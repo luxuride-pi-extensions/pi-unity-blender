@@ -45,6 +45,10 @@ editors' presence, any lock, and a per-direction checklist. The common answers:
   will time out rather than fail fast.
 - `busy: true` means another request holds the bridge. Both bridges serialize;
   a second concurrent request queues and then fails on its own timeout. Wait.
+- A lock reported with `unreadable: true` is still held — the file is there, its
+  contents just did not parse, which is what a process killed mid-transfer
+  leaves behind. Treat it as busy, not as a clean slate: it is reclaimed
+  automatically once it passes the stale threshold.
 - Neither editor needs to be on PATH; detection tries the env override, the
   macOS bundle, the Hub layout, and flatpak. A false "not installed" was a
   `commandExists("blender")` bug, now fixed — trust the tool over your shell.
