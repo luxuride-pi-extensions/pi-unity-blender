@@ -176,14 +176,20 @@ const unityBlenderGuidance = [
 	"Prefer transferring a named selection over the whole scene; the whole-scene path exists for a first look,",
 	"not for shipping a production asset.",
 	"Blender -> Unity goes through FBX (both apps read it well, and Unity cannot resolve Blender-relative",
-	"texture paths, so textures are embedded in the file). Unity -> Blender goes through OBJ + MTL, because",
-	"Blender's OBJ importer is native while Unity has no built-in mesh exporter at all.",
+	"texture paths, so textures are embedded in the file). Unity -> Blender hands over the SOURCE MODEL FILE",
+	"Unity itself imported (an .fbx under Assets/), copied verbatim into the staging directory and imported by",
+	"Blender at its authored orientation: no re-export, so the rig, the material assignment and the animation",
+	"survive, and no axis flip is needed (FBX is Y-up like Unity). OBJ + MTL is only the fallback for objects with",
+	"no source file on disk -- Unity has no built-in mesh exporter at all, so the bridge writes OBJ by hand. Run",
+	"`unity_source_models { mode: \"find\" }` first to see which files would travel and which objects cannot.",
 	"Staging files live in the pi cache directory, never inside a project or a .blend directory, so a failed",
 	"transfer does not leave debris in the user's work.",
 	"After a Blender -> Unity import, the result is a prefab in the destination folder; it is not added to the",
 	"open scene unless you say so. Read the returned scene name and prefab path before assuming placement.",
 	"After a Unity -> Blender import, the result is gathered in one named collection so it can be selected,",
-	"moved, or deleted as a unit; the Y axis is flipped by default because Unity is Y-up and Blender is Z-up.",
+	"moved, or deleted as a unit. An FBX carries no sub-mesh selection, so a file-based transfer brings every",
+	"sub-mesh in that file; the result names the extras instead of narrowing the scope silently. Names may also",
+	"differ from Unity's: Blender names imported objects after the file's own nodes, so trust the counts.",
 ].join(" ");
 
 // The real ExtensionAPI rather than a hand-rolled structural type. The

@@ -533,6 +533,8 @@ export async function transferUnityToBlender(
 	interface SourceModelExport {
 		stagedPaths: string[];
 		models?: { assetPath: string; objects: string[]; vertexTotal: number; boneTotal: number }[];
+		/** Assets referenced by the scene but absent on disk (a library-only checkout). */
+		missingSources?: string[];
 		unhandoffableObjects: string[];
 		unhandoffableNames?: string[];
 		unhandoffableCounts?: Record<string, number>;
@@ -569,7 +571,13 @@ export async function transferUnityToBlender(
 	const ambiguousNames = allUnhandoffable.filter((name) => (unhandoffableCounts[name] ?? 1) > 1);
 	const objNames = allUnhandoffable.filter((name) => (unhandoffableCounts[name] ?? 1) <= 1);
 
-	const needObjExport = !preferSourceModels || (stagedPaths.length > 0 && objNames.length > 0);
+	// The OBJ route runs whenever there is something only it can reach. The
+	// `stagedPaths.length > 0` term used to gate it, which threw away a
+	// legitimate transfer: a selection of only unhandoffable objects (Unity's
+	// built-in primitives) staged no files, so both terms were false and the
+	// transfer died with "Nothing to transfer" while objNames held the very
+	// meshes the OBJ exporter exists to carry.
+	const needObjExport = !preferSourceModels || objNames.length > 0;
 
 	interface ObjExport {
 		objPath: string;
@@ -610,6 +618,18 @@ export async function transferUnityToBlender(
 	// on-disk lock serialises them, and only the LAST one saves -- saving after
 	// the first would persist a half-finished transfer.
 	const steps: { kind: "fbx" | "obj"; config: Record<string, unknown> }[] = [];
+	// A source model that is referenced by the scene but absent on disk (a
+	// library-only checkout) is not a file to hand over. Say which ones, and
+	// offer the OBJ route, rather than importing a partial selection as if the
+	// whole selection travelled.
+	const missingSources = sourceExport?.missingSources ?? [];
+	for (const assetPath of missingSources) {
+		notes.push(
+			`NOT transferred: ${assetPath} is referenced by the scene but does not exist on disk, so there is ` +
+				"no file to hand over. The model is missing from the project; the geometry was not exported as " +
+				"OBJ either, because OBJ re-serialises what the file already holds.",
+		);
+	}
 	if (stagedPaths.length > 0) {
 		steps.push({
 			kind: "fbx",
