@@ -56,8 +56,48 @@ function resolveTodoEntry() {
 
 /** Does this template's tools: list name a tool that `todo` provides? */
 function usesTodo(source) {
+	return namesTool(source, "todo");
+}
+
+/** Does this template's tools: list name the given tool? */
+function namesTool(source, name) {
 	const tools = /^tools:.*$/m.exec(source)?.[0] ?? "";
-	return tools.split(",").some((tool) => tool.trim() === "todo");
+	return tools.split(",").some((tool) => tool.trim() === name);
+}
+
+/**
+ * Does the prompt body tell the agent to call a tool that tools: omits?
+ *
+ * `tools` is a STRICT allowlist (pi-subagents/docs/agents.md), so a tool named
+ * in the prompt but absent from it is silently unavailable -- the agent is
+ * handed a call it cannot make, with no error anywhere. That is the same
+ * failure this file already guards against on the extensions: axis, and it is
+ * worse here, because the prompt makes such a call MANDATORY. A manager told to
+ * verify a transfer with blender_scene_info, and not given it, either skips the
+ * only defense against a silent geometry loss or wastes a turn discovering it.
+ *
+ * The candidate scan is deliberately narrow. Pi tool names are snake_case with
+ * an underscore (unity_scene_info, blender_scene_info); tool PARAMETERS are
+ * camelCase or a bare lowercase word (objectNames, saveAfter, mode). Requiring
+ * an underscore is what separates the two, and it is why this does not fire on
+ * every parameter name in the prose. It only sees BACKTICKED names, so a tool
+ * referenced in plain prose is not checked -- a known gap, accepted because a
+ * looser rule produces more noise than signal.
+ */
+function toolsMissingFromAllowlist(source) {
+	const declared = new Set(
+		(/^tools:.*$/m.exec(source)?.[0] ?? "")
+			.split(":")[1]
+			.split(",")
+			.map((tool) => tool.trim())
+			.filter(Boolean),
+	);
+	const body = source.replace(/^---[\s\S]*?\n---\n/, "");
+	const mentioned = new Set();
+	for (const [, name] of body.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
+		mentioned.add(name);
+	}
+	return [...mentioned].filter((name) => !declared.has(name));
 }
 
 /**
@@ -72,13 +112,17 @@ function resolveInstalledExtensionDir(name) {
 	return installed;
 }
 
-// The Unity extension is listed as well as the binder, and BOTH are required.
-// A foreground child does not load ambient parent extensions, so a tool named
-// in `tools:` that no listed extension registers is requested and never
-// provided. The manager is useless with only half its toolset.
+// The Unity AND Blender extensions are listed as well as the binder, and ALL
+// THREE are required. A foreground child does not load ambient parent
+// extensions, so a tool named in `tools:` that no listed extension registers is
+// requested and never provided. The manager is useless with only half its
+// toolset -- and "half" is easy to get wrong in a way nothing catches: naming
+// blender_scene_info in tools: while vibe-blender is absent from this list
+// leaves the child holding a verification tool that no extension provides.
 const extensionDirs = [
 	resolveInstalledExtensionDir("unity-blender"),
 	resolveInstalledExtensionDir("vibe-unity"),
+	resolveInstalledExtensionDir("vibe-blender"),
 ]
 	// Drop a path that does not exist, but only if at least one does -- an
 	// all-missing pair is worth warning about rather than silently trimming.
@@ -111,6 +155,36 @@ for (const { file, extensionDir } of targets) {
 	const original = readFileSync(source, "utf8");
 	const extensions = usesTodo(original) && todoEntry ? `${extensionDir}, ${todoEntry}` : extensionDir;
 	const stamped = original.replace(/^extensions:.*$/m, `extensions: ${extensions}`);
+
+	// The transpose of the tools:/extensions: guard: a tool that needs a
+	// provider the extensions: line does not list. prefix-matched because the
+	// tool names carry the application name.
+	for (const [prefix, extension] of [
+		["unity_", "vibe-unity"],
+		["blender_", "vibe-blender"],
+	]) {
+		const declaredTools = (/^tools:.*$/m.exec(original)?.[0] ?? "").split(":")[1];
+		if (
+			declaredTools?.split(",").some((tool) => tool.trim().startsWith(prefix)) &&
+			!extensionDirs.includes(resolveInstalledExtensionDir(extension))
+		) {
+			console.error(
+				`WARNING ${file}: tools: names a ${prefix}* tool but the ${extension} extension is not ` +
+					`resolvable, so the installed agent cannot call it.`,
+			);
+			problems += 1;
+		}
+	}
+
+	const missingTools = toolsMissingFromAllowlist(original);
+	if (missingTools.length > 0) {
+		console.error(
+			`WARNING ${file}: the prompt tells the agent to call ${missingTools.join(", ")}, which ` +
+				`tools: does not list. tools: is a strict allowlist, so the installed agent will not ` +
+				`have them. Add each to tools:.`,
+		);
+		problems += 1;
+	}
 
 	if (usesTodo(original) && !stamped.includes(todoEntry ?? "\0")) {
 		console.error(
