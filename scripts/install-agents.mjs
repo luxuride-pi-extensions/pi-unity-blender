@@ -17,6 +17,7 @@
  * Overrides:
  *   PI_HOME         default ~/.pi
  *   PI_AGENT_DIR    default $PI_AGENT_DIR, else $PI_HOME/agent
+ *   PI_TODO_ENTRY   default $PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -30,6 +31,34 @@ const TEMPLATES = join(EXT_ROOT, "agents");
 
 const PI_HOME = process.env.PI_HOME ?? join(homedir(), ".pi");
 const PI_AGENT_DIR = process.env.PI_AGENT_DIR ?? join(PI_HOME, "agent");
+
+const TODO_PACKAGE = "@juicesharp/rpiv-todo";
+
+/**
+ * The todo tool is provided by a SEPARATE extension, and a foreground child does
+ * not load ambient parent extensions. So a template that names `todo` in its
+ * `tools:` list must also list the todo package on its `extensions:` line, or
+ * the child is handed a `todo` it can never call. blender-manager documents this
+ * in its own frontmatter for the same reason.
+ */
+function resolveTodoEntry() {
+	const override = process.env.PI_TODO_ENTRY?.trim();
+	if (override) return override;
+	const candidate = join(PI_AGENT_DIR, "npm", "node_modules", TODO_PACKAGE, "index.ts");
+	if (existsSync(candidate)) return candidate;
+	console.error(
+		`WARNING: could not find ${TODO_PACKAGE} at ${candidate}. A template that names \`todo\` ` +
+			`in tools: will be installed without its provider, and the agent cannot call it.`,
+	);
+	problems += 1;
+	return null;
+}
+
+/** Does this template's tools: list name a tool that `todo` provides? */
+function usesTodo(source) {
+	const tools = /^tools:.*$/m.exec(source)?.[0] ?? "";
+	return tools.split(",").some((tool) => tool.trim() === "todo");
+}
 
 /**
  * The extension directory pi LOADS, which is not necessarily the checkout. If
@@ -62,6 +91,7 @@ const targets = [
 const write = process.argv.includes("--write");
 const agentDir = join(PI_AGENT_DIR, "agents");
 let problems = 0;
+const todoEntry = resolveTodoEntry();
 
 for (const { file, extensionDir } of targets) {
 	const source = join(TEMPLATES, file);
@@ -78,10 +108,17 @@ for (const { file, extensionDir } of targets) {
 
 	// Replace the placeholder rather than a literal path, so a template
 	// installed on this machine never claims to be installed on another.
-	const stamped = readFileSync(source, "utf8").replace(
-		/^extensions:.*$/m,
-		`extensions: ${extensionDir}`,
-	);
+	const original = readFileSync(source, "utf8");
+	const extensions = usesTodo(original) && todoEntry ? `${extensionDir}, ${todoEntry}` : extensionDir;
+	const stamped = original.replace(/^extensions:.*$/m, `extensions: ${extensions}`);
+
+	if (usesTodo(original) && !stamped.includes(todoEntry ?? "\0")) {
+		console.error(
+			`WARNING ${file}: names \`todo\` in tools: but its extensions: line would not include the ` +
+				`todo package, so the installed agent cannot call it.`,
+		);
+		problems += 1;
+	}
 
 	// If the placeholder is still present after substitution, the template has
 	// more than one `extensions:` line and the stamp hit the wrong one.
@@ -96,9 +133,9 @@ for (const { file, extensionDir } of targets) {
 	if (write) {
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(destination, stamped);
-		console.log(`wrote ${destination}  (extensions: ${extensionDir})`);
+		console.log(`wrote ${destination}  (extensions: ${extensions})`);
 	} else {
-		console.log(`${file} -> ${destination}\n  extensions: ${extensionDir}`);
+		console.log(`${file} -> ${destination}\n  extensions: ${extensions}`);
 	}
 }
 

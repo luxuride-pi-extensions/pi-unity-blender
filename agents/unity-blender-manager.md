@@ -4,9 +4,16 @@ description: Unity-Blender manager — the ROOT agent for work that crosses betw
 tools: subagent, read, todo, grep, find, ls, unity_blender_status, unity_blender_transfer, subagents_enable, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
-# committed and correct on two machines. The placeholder below is substituted at
-# install time by `node scripts/install-agents.mjs --write`.
-extensions: __PI_AGENT_EXTENSION_DIR__
+# committed and correct on two machines. Both placeholders below are substituted
+# at install time by `node scripts/install-agents.mjs --write`, which rebuilds
+# this whole line from the two extension dirs it resolves plus the todo package.
+#
+# The todo package is listed because this template names `todo` in `tools:`. A
+# foreground child does not load ambient parent extensions, so a tool named here
+# that no listed extension registers is requested and NEVER PROVIDED -- the child
+# is handed a `todo` it can never call, with no error anywhere. `todo` is what
+# keeps a long build's plan from drifting across a two-application task.
+extensions: __PI_AGENT_EXTENSION_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
 acceptanceRole: read-only
 thinking: high
