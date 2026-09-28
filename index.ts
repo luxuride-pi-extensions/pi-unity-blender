@@ -17,7 +17,12 @@
 
 import { Type } from "typebox";
 
-import { getBlenderBridgeDir, getStagingDir, getUnityBridgeDir } from "./config.js";
+import {
+	getBlenderBridgeDir,
+	getBundledSkillsDir,
+	getStagingDir,
+	getUnityBridgeDir,
+} from "./config.js";
 import { readBridgeLock, isBridgeAlive } from "./binder/bridge.js";
 import { detectBlender, detectUnity } from "./binder/editors.js";
 import {
@@ -405,6 +410,11 @@ export default function unityBlender(pi: {
 			});
 		},
 	});
+
+	// Publish the bundled skills. Without this hook the skills dir is invisible
+	// to pi, so the skill would exist on disk and never load -- the same
+	// unreachable-feature failure as the unregistered unity_capture_view tool.
+	pi.on("resources_discover", () => ({ skillPaths: [getBundledSkillsDir()] }));
 
 	// A new session is a fresh start: the binder goes back to silent until the
 	// user runs /unity-blender or a unity_blender_* tool again.

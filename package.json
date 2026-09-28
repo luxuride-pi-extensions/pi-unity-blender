@@ -6,7 +6,9 @@
 	"type": "module",
 	"license": "MIT",
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "node test/parse-summary.mjs",
+		"install:agents": "node scripts/install-agents.mjs"
 	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "^0.87.1",

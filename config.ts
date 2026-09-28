@@ -10,9 +10,21 @@
 
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 const APP_NAME = "unity-blender";
+
+/** Bundled skills, published to pi through the resources_discover hook. */
+export function getBundledSkillsDir(): string {
+	return join(EXTENSION_DIR, "skills");
+}
+
+/** Bundled agent templates, installed by scripts/install-agents.mjs. */
+export function getBundledAgentsDir(): string {
+	return join(EXTENSION_DIR, "agents");
+}
 
 function xdgCacheHome(): string {
 	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");

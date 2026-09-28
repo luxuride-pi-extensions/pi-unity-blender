@@ -25,7 +25,24 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/unity-blender
 ```
 
 Same two caveats as the other extensions: `node_modules/typebox` symlinks into
-pi's own install, and there are no agent templates here to copy.
+pi's own install, and agent templates must be installed from the **binder's**
+repo — not pi-vibe-unity's installer, which would race over the same file.
+
+```bash
+node scripts/install-agents.mjs            # dry run: print resolved paths
+node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
+```
+
+`unity-blender-manager` is the ROOT agent for cross-application work: it is not
+a Unity subagent, it holds both extensions on its `extensions:` line, and it
+decides what crosses in which direction and verifies it on the far side. Both
+paths are required on that line — a foreground child does not load ambient
+parent extensions, so a tool named in `tools:` that no listed extension
+registers is requested and never provided.
+
+The `unity-blender-transfer` skill ships in `skills/` and is published through a
+`resources_discover` hook added to `index.ts`. Without that hook the directory
+is invisible to pi: the skill would exist on disk and never load.
 
 ## Usage
 
