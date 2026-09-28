@@ -33,10 +33,46 @@ function expandUserPath(raw: string, cwd: string = process.cwd()): string {
 }
 
 /** Matches pi-vibe-blender's ENV_BLENDER_BRIDGE_DIR. */
+/** Matches pi-vibe-blender's ENV_BLENDER_BRIDGE_DIR. */
+const ENV_BLENDER_BRIDGE_DIR = "PI_BLENDER_BRIDGE_DIR";
+/** Matches pi-vibe-blender's ENV_BLENDER_INSTANCE_ID. */
+const ENV_BLENDER_INSTANCE_ID = "PI_BLENDER_INSTANCE_ID";
+
+/**
+ * The bridge dir the live Blender actually polls, which is NOT the bridge ROOT.
+ *
+ * pi-vibe-blender gives each pi session a private dir at
+ * `<root>/<instance-id>`; the Blender it launches polls that subdir, not the
+ * root. This function used to resolve the root alone, so it looked for a
+ * heartbeat in a directory no Blender ever writes to. The symptom was specific
+ * and misleading: `unity_blender_status` reported the Blender bridge DEAD and
+ * advised not to transfer, while Blender was up, serving this very session, in
+ * the subdir one level down -- and `unity_blender_transfer` would then have
+ * written a request into the root and waited out the full cold-start timeout for
+ * a poller that did not exist. The recommendation text made it worse, telling
+ * the user to open an editor that was already open in front of them.
+ *
+ * pi-vibe-blender is deliberately NOT imported here (see the module header: the
+ * binder must survive that extension being moved, upgraded, or removed), so the
+ * rule is restated here instead: an explicit override is honoured exactly as
+ * given, and otherwise the instance id is appended to the root. The id is
+ * inherited from the parent pi process rather than minted, so every process in
+ * one session's delegation tree -- manager and subagents alike -- resolves the
+ * same dir, and a subagent of a transfer manager talks to the same Blender its
+ * manager does.
+ */
 export function getBlenderBridgeDir(): string {
-	return expandUserPath(
-		process.env.PI_BLENDER_BRIDGE_DIR?.trim() || join(xdgCacheHome(), "vibe-blender", "bridge"),
-	);
+	const override = process.env[ENV_BLENDER_BRIDGE_DIR]?.trim();
+	if (override) return expandUserPath(override);
+	const root = expandUserPath(join(xdgCacheHome(), "vibe-blender", "bridge"));
+	const instanceId = process.env[ENV_BLENDER_INSTANCE_ID]?.trim();
+	// Only a traversal-free id is usable as a path segment. A malformed one
+	// falls back to the root, which is the same "not answering" verdict the
+	// pre-instance layout produced rather than a path outside the cache.
+	if (!instanceId || !/^[A-Za-z0-9._-]{1,64}$/.test(instanceId) || instanceId === "." || instanceId === "..") {
+		return root;
+	}
+	return join(root, instanceId);
 }
 
 /** Matches pi-vibe-unity's ENV_UNITY_BRIDGE_DIR. */
