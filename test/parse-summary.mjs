@@ -36,9 +36,12 @@ function eq(name, actual, expected) {
 	check(name, a === e, `expected ${e}, got ${a}`);
 }
 
-// The real shape import_fbx.py prints, with the values a real Chiffon avatar
-// transfer produced. Kept verbatim in structure so a key added to the Python
-// side is a key this fixture is expected to grow.
+// The exact shape import_fbx.py prints. The VALUES are modelled on a real
+// Chiffon avatar transfer -- the four FBX names are the files that transfer
+// staged, and the three armatures are the ones blender_scene_info then
+// measured (186/68/109 bones) -- but this is a reconstructed fixture, not a
+// captured stdout. What matters is that it carries every key the script emits,
+// so adding a key to the Python side is a key this fixture is expected to grow.
 const REAL_OUTPUT = [
 	"Blender 5.2.0 LTS",
 	'{"importedNames": ["Armature", "Armature.001", "Armature.002", "Body", "ICO球"], "materialNames": ["Material.002", "Body", "Costume"], "collectionName": "Pi_Imported", "vertexTotal": 46993, "importedFiles": ["Chiffon_ver1.0.0.fbx", "PcHair.fbx", "Serenity_LC.fbx", "zig.fbx"], "armatures": ["Armature", "Armature.001", "Armature.002"], "flippedRoots": []}',
@@ -109,7 +112,6 @@ if (last !== null) {
 	eq("the last summary's files are the ones reported", last.importedFiles, ["b.fbx"]);
 }
 
-const total = passed + failures.length;
 console.log(`${passed} passed, ${failures.length} failed (parse summary)`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);
 process.exit(failures.length === 0 ? 0 : 1);
