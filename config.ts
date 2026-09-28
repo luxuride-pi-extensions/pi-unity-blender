@@ -8,11 +8,26 @@
  * publish them, and talks to both queues with its own small client.
  */
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as localCore from "./manager-core.local.js";
+import { loadManagerCoreOrLocal } from "./manager-core.js";
+
+/**
+ * The shared core, or this extension's own copy of it.
+ *
+ * Resolved at module load because every function below runs while the extension
+ * is being evaluated, including the instance-id publication further down. A lazy
+ * resolve would leave the paths above it and the paths below it using two
+ * different definitions of "where pi keeps its extensions", which is how a
+ * binder ends up reading a side prompt from one install and a bridge dir from
+ * another.
+ */
+const core = loadManagerCoreOrLocal(localCore);
 
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 const APP_NAME = "unity-blender";
@@ -43,21 +58,69 @@ export function getBundledSkillsDir(): string {
  * inert and misleading. A missing or unreadable file yields a string that says
  * so, because a manager that silently runs on a few lines of generic guidance
  * is worse than one that reports the prompt is gone.
+ *
+ * What this returns is the CONNECTOR prompt followed by both side prompts, so
+ * the one manager that holds both toolchains briefs from the same procedures its
+ * own side's manager uses. See readSideManagerPrompts() for why the side
+ * sections are included whole and wrapped rather than summarized.
  */
 export function getManagerPrompt(): string {
-	try {
-		const source = readFileSync(join(EXTENSION_DIR, "agents", "unity-blender-manager.md"), "utf8");
-		return source.replace(/^---[\s\S]*?\n---\n/, "").trim();
-	} catch (error) {
-		return (
-			"The manager prompt could not be read from agents/unity-blender-manager.md, so this " +
-			`session has no detailed manager instructions (${error instanceof Error ? error.message : String(error)}). ` +
-			"Say so plainly and ask the user to check that file exists; do not fall back to guessing at " +
-			"which agent owns which work."
-		);
-	}
+	return core.composeManagerPrompt({
+		connectorPath: join(EXTENSION_DIR, "agents", "unity-blender-manager.md"),
+		connectorRole: "unity-blender manager",
+		sides: SIDE_MANAGER_PROMPTS,
+	});
 }
 
+/**
+ * The side prompts this manager runs on, and the extra file each keeps beside
+ * its manager prompt. Keyed by the extension directory name pi installs, not by
+ * a checkout path, so a symlinked install resolves the same as a real one.
+ */
+const SIDE_MANAGER_PROMPTS = [
+	{
+		label: "Blender side",
+		extension: "vibe-blender",
+		primary: join("blender", "agents", "blender-manager.md"),
+		// The Blender side keeps its brief template and stop conditions in a
+		// second file that its own getManagerPrompt() appends. Read it here too,
+		// or this manager would brief workers without the contract that makes a
+		// brief cheap to act on.
+		extra: join("blender", "agents", "exchange.md"),
+	},
+	{ label: "Unity side", extension: "vibe-unity", primary: join("unity", "agents", "unity-manager.md"), extra: null },
+] as const;
+
+/**
+ * The two side manager prompts, in full, each under a provenance header.
+ *
+ * This session manages both applications, so it needs both sides' procedures.
+ * Copying them into the binder would be the obvious move and the wrong one:
+ * they are ~370 and ~500 lines of markdown that change whenever either
+ * extension is upgraded, and a copy here goes stale silently and looks
+ * authoritative while doing it. Reading the installed extensions' own files is
+ * the same contract getManagerPrompt() already uses for its own prompt — one
+ * editable source per manager, and the binder holds the boundary rather than
+ * the parts.
+ *
+ * The composition itself — reading a connector plus a list of sides, wrapping
+ * each side under a provenance header, and degrading loudly when any of them
+ * cannot be read — is now shared code in pi-manager-core, because the Unity
+ * side and the Blender side each need it for their own single-side manager
+ * prompt, and three copies of a precedence rule that decides which of several
+ * competing managers wins is three chances to get the precedence wrong. The
+ * reasoning behind the header and the whole-file inclusion is documented on
+ * composeManagerPrompt() in that core.
+ */
+
+/**
+ * Where pi keeps its agent directory, which is where the side extensions live.
+ *
+ * Overridable for the same reason the install script takes PI_AGENT_DIR: a test
+ * harness and a non-default pi home both need to point somewhere else, and a
+ * hardcoded ~/.pi would resolve to a real installation and read the wrong
+ * extension's prompt.
+ */
 function xdgCacheHome(): string {
 	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
 }

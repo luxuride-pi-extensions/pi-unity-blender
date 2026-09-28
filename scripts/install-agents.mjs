@@ -25,6 +25,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkTemplate, usesTodo } from "./agent-template-checks.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXT_ROOT = resolve(HERE, "..");
 const TEMPLATES = join(EXT_ROOT, "agents");
@@ -35,22 +37,15 @@ const PI_AGENT_DIR = process.env.PI_AGENT_DIR ?? join(PI_HOME, "agent");
 const TODO_PACKAGE = "@juicesharp/rpiv-todo";
 
 /**
- * Backticked snake_case words in a prompt body that are NOT tool names.
- *
- * The scan below cannot tell a tool from a literal, and the todo task statuses
- * are the one place a prompt is obliged to quote a snake_case value: a manager
- * told to mark a task `in_progress` is quoting the value it must pass to `todo`,
- * not naming a tool it forgot. Flagging that produces a warning on a correct
- * template, which trains the reader to ignore warnings.
- */
-const KNOWN_NON_TOOL_WORDS = new Set(["in_progress"]);
-
-/**
  * The todo tool is provided by a SEPARATE extension, and a foreground child does
  * not load ambient parent extensions. So a template that names `todo` in its
  * `tools:` list must also list the todo package on its `extensions:` line, or
  * the child is handed a `todo` it can never call. blender-manager documents this
  * in its own frontmatter for the same reason.
+ *
+ * Whether the template needs it is `usesTodo` from the SHARED checks, not a
+ * hardcoded flag here: a flag is a second source of truth that can disagree
+ * with the file being installed.
  */
 function resolveTodoEntry() {
 	const override = process.env.PI_TODO_ENTRY?.trim();
@@ -63,52 +58,6 @@ function resolveTodoEntry() {
 	);
 	problems += 1;
 	return null;
-}
-
-/** Does this template's tools: list name a tool that `todo` provides? */
-function usesTodo(source) {
-	return namesTool(source, "todo");
-}
-
-/** Does this template's tools: list name the given tool? */
-function namesTool(source, name) {
-	const tools = /^tools:.*$/m.exec(source)?.[0] ?? "";
-	return tools.split(",").some((tool) => tool.trim() === name);
-}
-
-/**
- * Does the prompt body tell the agent to call a tool that tools: omits?
- *
- * `tools` is a STRICT allowlist (pi-subagents/docs/agents.md), so a tool named
- * in the prompt but absent from it is silently unavailable -- the agent is
- * handed a call it cannot make, with no error anywhere. That is the same
- * failure this file already guards against on the extensions: axis, and it is
- * worse here, because the prompt makes such a call MANDATORY. A manager told to
- * verify a transfer with blender_scene_info, and not given it, either skips the
- * only defense against a silent geometry loss or wastes a turn discovering it.
- *
- * The candidate scan is deliberately narrow. Pi tool names are snake_case with
- * an underscore (unity_scene_info, blender_scene_info); tool PARAMETERS are
- * camelCase or a bare lowercase word (objectNames, saveAfter, mode). Requiring
- * an underscore is what separates the two, and it is why this does not fire on
- * every parameter name in the prose. It only sees BACKTICKED names, so a tool
- * referenced in plain prose is not checked -- a known gap, accepted because a
- * looser rule produces more noise than signal.
- */
-function toolsMissingFromAllowlist(source) {
-	const declared = new Set(
-		(/^tools:.*$/m.exec(source)?.[0] ?? "")
-			.split(":")[1]
-			.split(",")
-			.map((tool) => tool.trim())
-			.filter(Boolean),
-	);
-	const body = source.replace(/^---[\s\S]*?\n---\n/, "");
-	const mentioned = new Set();
-	for (const [, name] of body.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
-		mentioned.add(name);
-	}
-	return [...mentioned].filter((name) => !declared.has(name) && !KNOWN_NON_TOOL_WORDS.has(name));
 }
 
 /**
@@ -189,33 +138,13 @@ for (const { file, extensionDir } of targets) {
 	const extensions = usesTodo(original) && todoEntry ? `${extensionDir}, ${todoEntry}` : extensionDir;
 	const stamped = original.replace(/^extensions:.*$/m, `extensions: ${extensions}`);
 
-	// The transpose of the tools:/extensions: guard: a tool that needs a
-	// provider the extensions: line does not list. prefix-matched because the
-	// tool names carry the application name.
-	for (const [prefix, extension] of [
-		["unity_", "vibe-unity"],
-		["blender_", "vibe-blender"],
-	]) {
-		const declaredTools = (/^tools:.*$/m.exec(original)?.[0] ?? "").split(":")[1];
-		if (
-			declaredTools?.split(",").some((tool) => tool.trim().startsWith(prefix)) &&
-			!extensionDirs.includes(resolveInstalledExtensionDir(extension))
-		) {
-			console.error(
-				`WARNING ${file}: tools: names a ${prefix}* tool but the ${extension} extension is not ` +
-					`resolvable, so the installed agent cannot call it.`,
-			);
-			problems += 1;
-		}
-	}
-
-	const missingTools = toolsMissingFromAllowlist(original);
-	if (missingTools.length > 0) {
-		console.error(
-			`WARNING ${file}: the prompt tells the agent to call ${missingTools.join(", ")}, which ` +
-				`tools: does not list. tools: is a strict allowlist, so the installed agent will not ` +
-				`have them. Add each to tools:.`,
-		);
+	// The shared checks, on the STAMPED text because that is what is installed.
+	// They cover both silent failures at once: a tool the prompt names but
+	// tools: omits, and a tool whose extension cannot be resolved.
+	for (const problem of checkTemplate(stamped, {
+		isResolvable: (name) => extensionDirs.includes(resolveInstalledExtensionDir(name)),
+	})) {
+		console.error(`WARNING ${file}: ${problem}`);
 		problems += 1;
 	}
 
@@ -227,14 +156,9 @@ for (const { file, extensionDir } of targets) {
 		problems += 1;
 	}
 
-	// If the placeholder is still present after substitution, the template has
-	// more than one `extensions:` line and the stamp hit the wrong one.
-	if (stamped.includes("__PI_AGENT_EXTENSION_DIR__")) {
-		console.error(
-			`WARNING ${file}: the placeholder survived substitution; the file has more than one extensions: line.`,
-		);
-		problems += 1;
-	}
+	// The surviving-placeholder case (more than one `extensions:` line, so the
+	// stamp hit the wrong one) is now reported by the shared checks above,
+	// rather than by a fourth copy of it here.
 
 	const destination = join(agentDir, file);
 	if (write) {

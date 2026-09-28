@@ -28,6 +28,8 @@ import {
 	getUnityBridgeDir,
 } from "./config.js";
 import { readBridgeLock, isBridgeAlive } from "./binder/bridge.js";
+import * as localCore from "./manager-core.local.js";
+import { loadManagerCoreOrLocal } from "./manager-core.js";
 import { detectBlender, detectUnity } from "./binder/editors.js";
 import {
 	checkTransferPreconditions,
@@ -39,6 +41,16 @@ import {
 	type TransferPreconditions,
 } from "./binder/transfer.js";
 
+/**
+ * The shared manager core, or this extension's own copy of it.
+ *
+ * See manager-core.ts for the resolution order and the reason it is a runtime
+ * lookup rather than an import: this extension must keep working when
+ * pi-manager-core is not installed, which is the normal case for anyone who
+ * only wants transfers.
+ */
+const core = loadManagerCoreOrLocal(localCore);
+
 const TRANSFER_DIRECTIONS = ["blender-to-unity", "unity-to-blender"] as const;
 
 function isTransferDirection(value: unknown): value is TransferDirection {
@@ -48,9 +60,6 @@ function isTransferDirection(value: unknown): value is TransferDirection {
 function formatJsonResult(value: unknown): string {
 	return JSON.stringify(value, undefined, 2);
 }
-
-/** The name pi-subagents stamps into every child session's system prompt. */
-const CHILD_AGENT_PROMPT_PATTERN = /<active_agent\s+name="([^"]*)"/;
 
 /**
  * Image types `read` would attach to the request, mirroring pi's own sniffing.
@@ -70,45 +79,46 @@ const IMAGE_READ_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp",
  * into a delegating manager on that basis would block the user's own `write`
  * and `edit` without ever having been asked for it. The same rule pi-vibe-blender
  * follows for /blender.
- */
-let managerMode = false;
-function markManagerMode(): void {
-	managerMode = true;
-}
-
-/**
- * Leave manager mode, undoing /unity-blender's gate.
  *
- * Without this the gate would last until the session restarted, which breaks a
- * session that interleaves transfer work with writing a script, a C# file, or a
- * project file of any kind. Exiting is deliberately not a /new: only the
- * restriction on this session ends, the extensions and their tools stay loaded.
- */
-function clearManagerMode(): boolean {
-	if (!managerMode) return false;
-	managerMode = false;
-	return true;
-}
-
-/**
- * Whether this session is acting as THE manager, and so is subject to the gate.
+ * The MECHANISM — engaged flag, gate flag, and the exemption for a subagent
+ * inside a manager session — is the shared core's, because all three manager
+ * extensions need it and each previously reimplemented the exemption by a
+ * regex of its own. The POLICY — which tools are refused and what the refusal
+ * says — is below, because that is genuinely this extension's: a Blender
+ * refusal naming `blender-worker` and a Unity refusal naming `unity-worker`
+ * cannot both live in a shared file without it naming applications it does not
+ * know about.
  *
- * /unity-blender does not spawn a manager -- this session IS the manager, so
- * the user can watch its todos and progress in the session they are typing in.
- * That makes the test a single one: the root session in manager mode is the
- * manager, and ANY child is not.
- *
- * A child (blender-worker, unity-worker, a critic) MUST author code and look
- * at renders, which is exactly what the gate forbids, and it carries an
- * `<active_agent name="...">` tag in its prompt. Gating those would make the
- * delegation this mode exists to cause impossible. The exemption is by
- * STRUCTURE -- being a child at all -- rather than by a named exception: there
- * is no manager subagent left to name, which is the whole point of the change.
+ * The child exemption is by STRUCTURE — being a child at all — rather than by
+ * a named exception: there is no manager subagent left to name, which is the
+ * whole point of the command-session design.
  */
-function isManagerSession(systemPrompt: string): boolean {
-	if (!managerMode) return false;
-	return CHILD_AGENT_PROMPT_PATTERN.exec(systemPrompt) === null;
-}
+const managerMode = core.createManagerMode({
+	// Custom tools are not listed, and that is deliberate rather than an
+	// omission: a custom tool is not a `write` or a `read`, so the gate's own
+	// refusals below never match one and the allowlist would only be a second
+	// place to forget a tool.
+	onGateMessage: (event) => {
+		if (event.toolName === "write" || event.toolName === "edit") {
+			return {
+				block: true,
+				reason:
+					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. This session IS the manager — you were not handed a job to relay, and the subagents you spawn are the ones that do the work. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
+			};
+		}
+		if (event.toolName === "read") {
+			const path = typeof event.input.path === "string" ? event.input.path : "";
+			if (IMAGE_READ_EXTENSIONS.has(extname(path).toLowerCase())) {
+				return {
+					block: true,
+					reason:
+						"Manager role: do not read images. Judging a render or comparing it to a reference is the critic subagent's job — spawn a fresh-context `blender-critic` or `unity-critic` and let it return a PASS/FAIL verdict with concrete visual issues; read the returned critique text instead. To hand a reference image on, register it with `blender_add_reference` (which takes the `caption` you must write instead of a look) and put that path and caption in the subagent brief. A base64 image also stays in this session's transcript and is resent on every later request, so one read here inflates every remaining turn of the build.",
+				};
+			}
+		}
+		return null;
+	},
+});
 
 /**
  * One sentence an agent can act on. Liveness leads, because that is what
@@ -190,11 +200,8 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// The binder is opt-in, like pi-vibe-unity. Injecting transfer guidance on
 	// every turn of every session is noise in a conversation that may never
 	// mention Blender or Unity, and it competes for attention with whatever the
-	// user is actually doing. Mirrors pi-vibe-unity's `unityEngaged` flag.
-	let binderEngaged = false;
-	const markEngaged = (): void => {
-		binderEngaged = true;
-	};
+	// user is actually doing. Mirrors pi-vibe-unity's engaged flag.
+	managerMode.install(pi);
 	pi.registerTool({
 		name: "unity_blender_transfer",
 		label: "Unity / Blender transfer",
@@ -284,7 +291,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			_onUpdate?: unknown,
 			_ctx?: unknown,
 		) {
-			markEngaged();
+			managerMode.markEngaged();
 			const options = (params ?? {}) as {
 				direction: TransferDirection;
 				objectNames?: string[];
@@ -410,7 +417,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			_onUpdate?: unknown,
 			_ctx?: unknown,
 		) {
-			markEngaged();
+			managerMode.markEngaged();
 			const direction = (params as { direction?: TransferDirection } | undefined)?.direction;
 			// Always compute the liveness and detection facts. Only the
 			// per-direction precondition checklist is optional -- defaulting
@@ -493,8 +500,20 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// unreachable. See RegisteredCommand in pi's dist/core/extensions/types.d.ts.
 	// There is also no `getArgument` option; `description` and
 	// `getArgumentCompletions` are the documented affordances.
-	pi.registerCommand("unity-blender", {
+	//
+	// The registration, the argument handling and the deliverAs choice are the
+	// shared core's, because all three manager extensions send the user's text
+	// the same way and getting `steer` wrong is invisible until a task is
+	// silently dropped mid-build. What stays here is the binder's own text: the
+	// opening task, and the autocomplete examples.
+	core.registerEngageCommand(pi, {
+		name: "unity-blender",
 		description: "Transfer meshes and materials between a live Blender session and a live Unity Editor.",
+		// No usage notice: a bare /unity-blender is meaningful here, not a
+		// mistake. It opens by asking for status, because a transfer cannot
+		// start before anyone knows which application is actually reachable.
+		onEngage: () => managerMode.markEngaged(),
+		engagedMessage: "Transfer engaged — this session is the manager of both applications.",
 		getArgumentCompletions: (argumentPrefix: string) =>
 			argumentPrefix.length > 0
 				? null
@@ -510,22 +529,10 @@ export default function unityBlender(pi: ExtensionAPI) {
 							description: "Unity -> Blender, current selection",
 						},
 					],
-		async handler(args: string, ctx: { isIdle?: () => boolean }) {
-			markEngaged();
-			// Entering manager mode here, and ONLY here, is what makes the gate
-			// below structural rather than advisory. A tool call must not do it:
-			// checking status is not the user asking for a build.
-			markManagerMode();
-			const task =
-				args.trim().length > 0
-					? `/unity-blender ${args.trim()}`
-					: "/unity-blender I want to move geometry between Blender and Unity. Start by calling " +
-						"unity_blender_status so we know which applications are actually reachable, then tell me " +
-						"what you can do and what you need from me before transferring anything.";
-			pi.sendUserMessage(task, {
-				deliverAs: ctx.isIdle?.() ? undefined : "steer",
-			});
-		},
+		fallbackTask:
+			"/unity-blender I want to move geometry between Blender and Unity. Start by calling " +
+			"unity_blender_status so we know which applications are actually reachable, then tell me " +
+			"what you can do and what you need from me before transferring anything.",
 	});
 
 	// Publish the bundled skills. Without this hook the skills dir is invisible
@@ -536,70 +543,31 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// /unity-blender-exit lifts the manager gate without ending the session or
 	// touching the tools. Without it a session that interleaves a transfer with
 	// writing a file of its own stays restricted until /new.
-	pi.registerCommand("unity-blender-exit", {
+	core.registerExitCommand(pi, {
+		name: "unity-blender-exit",
 		description: "Leave transfer manager mode — lift the write/edit/image gate (keeps the session and the tools)",
-		handler: async (_args, ctx) => {
-			if (!clearManagerMode()) {
-				ctx.ui.notify("Not in transfer manager mode — nothing to exit.", "info");
-				return;
-			}
-			ctx.ui.notify(
-				"Left transfer manager mode. The unity_blender_* tools, /unity-blender and the skills are still available; run /unity-blender to re-enter.",
-				"info",
-			);
-		},
+		onExit: () => managerMode.clearGate(),
+		notEngagedMessage: "Not in transfer manager mode — nothing to exit.",
+		exitedMessage:
+			"Left transfer manager mode. The unity_blender_* tools, /unity-blender and the skills are still available; run /unity-blender to re-enter.",
 	});
 
 	// A new session is a fresh start: the binder goes back to silent until the
 	// user runs /unity-blender or a unity_blender_* tool again, and so does the
 	// gate — a session that ends must not leave the next one restricted.
 	pi.on("session_start", () => {
-		binderEngaged = false;
-		managerMode = false;
+		managerMode.reset();
 	});
 
 	// Manager-role enforcement: the parent session plans, delegates, and reads
 	// reports. Blender code belongs to a `blender-worker` subagent, Unity C# to
 	// a `unity-worker`, and judging how a render looks to a critic that has
-	// vision. This gate makes that structural instead of advisory, because
-	// without it the parent drifts into doing everything itself and pays for
-	// every render and every script in its own context.
-	//
-	// Blocked in the manager: every `write`/`edit`, and `read` of an image.
-	// Allowed: text reads including `*.md` (the skills and agent definitions are
-	// needed to write the briefs), `bash`, and every `unity_*` / `blender_*`
-	// tool, which are custom tools and pass through untouched.
-	//
-	// Gated on managerMode, not on a transfer tool having run: the manager role
-	// exists only after /unity-blender. A session that calls a tool directly is
-	// doing the work itself, and blocking its writes would be backwards.
-	pi.on("tool_call", (event, ctx) => {
-		if (event.toolName === "write" || event.toolName === "edit") {
-			if (!isManagerSession(ctx.getSystemPrompt())) return undefined;
-			return {
-				block: true,
-				reason:
-					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. This session IS the manager — you were not handed a job to relay, and the subagents you spawn are the ones that do the work. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
-			};
-		}
-
-		if (event.toolName === "read") {
-			if (!isManagerSession(ctx.getSystemPrompt())) return undefined;
-			const path = typeof event.input.path === "string" ? event.input.path : "";
-			if (IMAGE_READ_EXTENSIONS.has(extname(path).toLowerCase())) {
-				return {
-					block: true,
-					reason:
-						"Manager role: do not read images. Judging a render or comparing it to a reference is the critic subagent's job — spawn a fresh-context `blender-critic` or `unity-critic` and let it return a PASS/FAIL verdict with concrete visual issues; read the returned critique text instead. To hand a reference image on, register it with `blender_add_reference` (which takes the `caption` you must write instead of a look) and put that path and caption in the subagent brief. A base64 image also stays in this session's transcript and is resent on every later request, so one read here inflates every remaining turn of the build.",
-				};
-			}
-		}
-
-		return undefined;
-	});
+	// vision. The gate itself is installed above, by the shared core; this
+	// extension supplies the three refusals, because they name agents only this
+	// manager can spawn.
 
 	pi.on("before_agent_start", () => {
-		if (!binderEngaged) return undefined;
+		if (!managerMode.isEngaged()) return undefined;
 		return {
 			message: {
 				customType: "unity_blender_context",
@@ -618,7 +586,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// separate router blob, because there is no router: this session is the
 	// manager, and everything it needs to know belongs in one place.
 	pi.on("before_agent_start", (event, ctx) => {
-		if (!isManagerSession(ctx.getSystemPrompt())) return undefined;
+		if (!managerMode.isManagerSession(ctx.getSystemPrompt())) return undefined;
 		// The mutable sections live on the EVENT. Reaching for
 		// ctx.systemPromptOptions is the first thing that looks plausible and
 		// does not exist on ExtensionContext.
