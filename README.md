@@ -33,12 +33,24 @@ node scripts/install-agents.mjs            # dry run: print resolved paths
 node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
 ```
 
-`unity-blender-manager` is the ROOT agent for cross-application work: it is not
-a Unity subagent, it holds both extensions on its `extensions:` line, and it
-decides what crosses in which direction and verifies it on the far side. Both
-paths are required on that line — a foreground child does not load ambient
-parent extensions, so a tool named in `tools:` that no listed extension
-registers is requested and never provided.
+`unity-blender-manager` is the ROOT agent for work in a live Blender session, a
+live Unity Editor, or both: it is not a Unity or a Blender subagent, it holds
+all three extensions on its `extensions:` line, and it owns both build loops as
+well as what crosses between them. All three paths are required — a foreground
+child does not load ambient parent extensions, so a tool named in `tools:` that
+no listed extension registers is requested and never provided.
+
+It replaces `unity-manager` and `blender-manager`, which are retired: those two
+roles are now one agent, and its `allowedAgents` is the flat union of their
+families. The prompt deliberately contains no build procedure. It routes to the
+per-side skills (`unity-live-state`, `blender-modules`, `unity-csharp`, …) and
+to `unity-blender-transfer`, which carry the loops and the failure modes. A
+copied loop goes stale the moment either extension is upgraded, and a stale
+loop is worse than none because it looks authoritative. What stays in the
+prompt is what no single skill can own: the two-applications-at-once rules —
+one `unity_blender_status` first, one mutating operation at a time across BOTH
+bridges, a transfer is a step inside a build rather than a separate task, and
+the manager never authors or eyeballs anything.
 
 The `unity-blender-transfer` skill ships in `skills/` and is published through a
 `resources_discover` hook added to `index.ts`. Without that hook the directory
@@ -76,7 +88,15 @@ This follows from the applications, not from preference:
 | Direction | Format | Why |
 | --- | --- | --- |
 | Blender → Unity | **FBX** | Both apps read FBX; Blender *writes* it natively and Unity imports it well. Textures are **embedded** (`embed_textures=True`) because Unity's importer cannot resolve Blender-relative texture paths. |
-| Unity → Blender | **OBJ + MTL** | Blender's OBJ importer is native and stable across 3.x/4.x. Unity has **no built-in mesh exporter at all** — the bridge writes OBJ by hand (`ExportObj` in `PiUnityBridge.cs`). |
+| Unity → Blender | **The source model file**, falling back to OBJ + MTL | A file carries the rig, the material assignment and the animation; a re-export flattens all of that away. `preferSourceModels` is on by default, and OBJ is the fallback for objects with no file behind them — Unity has **no built-in mesh exporter at all**, so the bridge writes OBJ by hand (`ExportObj` in `PiUnityBridge.cs`). |
+
+So a single Unity → Blender call often takes **both** routes at once: every
+object with a source file travels as that file, and everything else is exported
+separately as OBJ. The result reports it (`usedBothRoutes`), and the
+consequences are per-object — some objects arrive with an armature and others
+cannot, because an OBJ never carries bones. The axis handling differs by route
+too: an FBX import needs no fix (FBX is Y-up like Unity), while an OBJ import
+gets a negative Y scale. See the skill for the full per-object consequences.
 
 ---
 
@@ -160,16 +180,6 @@ machine. Every variable the code reads, in the order it matters:
 Both bridge directories can point at the same place, but they are independent
 queues: the binder talks to whichever editor is open and reports the other as
 dead. That is a correct report, not a bug.
-
-This extension has **no test suite of its own** — it is covered by
-`pi-vibe-unity`'s engagement test, which loads this extension from its
-*installed* symlink and asserts that it stays silent until the user engages. A
-change to `before_agent_start` here without a change in that test is how a
-guidance paragraph ends up injected on every turn again.
-
-`node_modules` is a tree of symlinks into pi's install and into the sibling
-`pi-vibe-unity` checkout, so a fresh clone needs them re-created before
-`tsc` will resolve anything. `.gitignore` excludes it for that reason.
 
 ## Known limits
 

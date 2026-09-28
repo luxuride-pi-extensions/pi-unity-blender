@@ -87,6 +87,70 @@ names an object. The exporter writes `o`, and a `g`-only OBJ imports as a single
 object named after the file, which is how `transfer` / `transfer.001` names
 appear when something upstream goes wrong.
 
+## One Blender, shared by the whole tree
+
+A transfer runs *through* the live session, so it is bound to that session's one
+Blender — not a Blender of its own. The root pi process owns the window; every
+manager, worker and critic in the session's tree inherits the same bridge
+instance id and therefore the same directory, and a cross-process `launch.claim`
+in that directory stops two processes from racing to open a second window. You
+do not need to arrange any of that, and you cannot make it per-subagent.
+
+The consequence for you is ordering, not identity. A transfer is a mutating
+request against a bridge that serializes: never overlap one with a module run or
+another transfer. A fan-out of workers is fine (they only author script files);
+the runs and any transfer go one at a time.
+
+`unity_blender_status` reports the owner as `blenderInstance`. `isRoot: false`
+is normal in a subagent. The signal that something is actually wrong is
+`instanceId !== rootInstanceId` — this process is addressing a different Blender
+than the session's owner — and `pinned: true`, meaning the user set
+`PI_BLENDER_BRIDGE_DIR` by hand, which switches the per-instance scheme off and
+makes one directory shared deliberately.
+
+## One transfer, two routes — know which you got
+
+A Unity -> Blender move is rarely one route. Every object with a source file
+travels as that file; everything else is exported separately as OBJ. A single
+call therefore often produces BOTH, and the result says so: `usedBothRoutes:
+true`, with the OBJ'd object names in the notes. Read the notes rather than the
+summary line, because the summary's `vertexTotal` and `materialNames` aggregate
+across both routes and hide which object lost which treatment.
+
+The consequences are per-object, and that is what the aggregate hides:
+
+- A source-file object keeps its rig, its material assignment and its
+  animation. An OBJ'd object has Kd/Ks/Ns only. So after a mixed transfer it is
+  normal — expected, not broken — that some objects have an ARMATURE in
+  `blender_scene_info` and others do not.
+- An FBX import needs no axis fix: FBX is Y-up like Unity, so Blender's
+  importer lines the two up on its own and the transfer says it was imported
+  "at its authored orientation". An OBJ import is given a **negative Y scale**
+  instead. That asymmetry matters on a round trip: send the OBJ'd object back
+  and the importer restores the handedness, so it is restored once, not
+  doubled. If an object comes back mirrored or lying on its side, this
+  asymmetry is the first thing to check, not the exporter.
+
+Ambiguity is reported rather than resolved. A GameObject name shared by several
+objects cannot be exported by name — the OBJ exporter takes one object per name
+— so those names come back in `ambiguousObjectNames` with their counts
+(`Head (x5)`) and transfer NOTHING by name, while being counted in the request.
+The fix is to give the specific object its own name or select it alone; do not
+retry the same names. `unhandoffableObjects` is the other bucket: no file on
+disk at all.
+
+## A transfer is a step inside a build, not a separate task
+
+Send when the sending side is FINISHED, after its own critic has passed. A
+model still being revised crosses the boundary, comes back needing a second fix
+loop, and the far side's critic scores a defect the near side already knew
+about — while neither side can see the other's history. One direction, one
+handover, per finished asset.
+
+Then verify with the RECEIVING side's critic, on a render of what actually
+landed. The transfer's own numbers prove that a script ran; they cannot see that
+a material arrived flat. That render is a subagent's job, never yours.
+
 ## After transferring
 
 Verify on the receiving side, not from the report:
@@ -118,6 +182,27 @@ result unreadable. Delete it, purge the orphaned data, and say that you did.
   the process is gone, and a *fresh* heartbeat on a long-running Editor is not
   evidence that its bridge code matches the current plugin source — the process
   loaded the file when it started. Editing a bridge's Python does not hot-reload.
+- **A transfer that carried the wrong thing.** Every check on this page passes
+  and the result is still wrong, because nothing in the wire format records what
+  the model is *supposed* to be. See the reference section above.
+
+## References, and the failure that survives a clean transfer
+
+If a transfer is driven by a reference image, spawn
+`unity-blender-reference-describer` first and hand its `Suggested caption` and
+`Applies to:` down to the side that builds. You have no image input either, and
+this skill's own failure mode makes a wrong caption unusually dangerous: a
+transfer has no opinion about whether the thing it carried was the thing you
+wanted. Geometry, UVs, and material slots all arrive, the counts check out, the
+prefab imports, and the only defect — the subject — crossed the boundary intact
+and undetected. It then reads as success to the worker, the critic, and the
+manager alike, because every one of them believes the same wrong sentence.
+
+So when a reference governs the transfer, `Applies to:` decides which side
+builds: `Blender` means model it there and send it over, `Unity` means the mesh
+already exists in the project and travels inward, `both` means the shape is
+shared but the material treatment is not — a material graph is flattened in
+either direction, so the receiving side still needs its own verification.
 
 ## Staging
 

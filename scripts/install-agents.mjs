@@ -35,6 +35,17 @@ const PI_AGENT_DIR = process.env.PI_AGENT_DIR ?? join(PI_HOME, "agent");
 const TODO_PACKAGE = "@juicesharp/rpiv-todo";
 
 /**
+ * Backticked snake_case words in a prompt body that are NOT tool names.
+ *
+ * The scan below cannot tell a tool from a literal, and the todo task statuses
+ * are the one place a prompt is obliged to quote a snake_case value: a manager
+ * told to mark a task `in_progress` is quoting the value it must pass to `todo`,
+ * not naming a tool it forgot. Flagging that produces a warning on a correct
+ * template, which trains the reader to ignore warnings.
+ */
+const KNOWN_NON_TOOL_WORDS = new Set(["in_progress"]);
+
+/**
  * The todo tool is provided by a SEPARATE extension, and a foreground child does
  * not load ambient parent extensions. So a template that names `todo` in its
  * `tools:` list must also list the todo package on its `extensions:` line, or
@@ -97,7 +108,7 @@ function toolsMissingFromAllowlist(source) {
 	for (const [, name] of body.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
 		mentioned.add(name);
 	}
-	return [...mentioned].filter((name) => !declared.has(name));
+	return [...mentioned].filter((name) => !declared.has(name) && !KNOWN_NON_TOOL_WORDS.has(name));
 }
 
 /**
@@ -130,6 +141,10 @@ const extensionDirs = [
 
 const targets = [
 	{ file: "unity-blender-manager.md", extensionDir: extensionDirs.join(", ") },
+	// Reads reference images with `read` and needs no extension tool, so it
+	// declares no `extensions:` line. It is listed here so the installer
+	// owns the copy; the stamp is a no-op on a file with nothing to stamp.
+	{ file: "unity-blender-reference-describer.md", extensionDir: extensionDirs.join(", ") },
 ];
 
 const write = process.argv.includes("--write");
