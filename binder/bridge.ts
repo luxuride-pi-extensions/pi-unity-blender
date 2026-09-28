@@ -58,6 +58,8 @@ export interface BridgeLockInfo {
 	label: string;
 	acquiredAt: string;
 	ageMs: number;
+	/** The lock file exists but its contents did not parse. See readBridgeLock. */
+	unreadable: boolean;
 }
 
 export function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -88,22 +90,47 @@ export function isBridgeAlive(bridgeDir: string): boolean {
 	}
 }
 
+/**
+ * Reads a bridge lock without mutating it.
+ *
+ * A lock file that exists but does not parse is still a HELD lock, so it must
+ * not collapse to null: `unity_blender_status` derives "busy" from this, and
+ * reporting idle while a transfer is in flight is exactly the wrong answer -- the
+ * caller would then start a second transfer against the same live editor, and
+ * both bridges serialize their requests anyway. A truncated lock is what a
+ * crashed process leaves behind, and acquireBridgeLock reclaims it on the stale
+ * threshold, so all this can do safely is report it honestly.
+ */
 export function readBridgeLock(bridgeDir: string): BridgeLockInfo | null {
+	const lockPath = join(bridgeDir, "bridge.lock");
+	let mtimeMs: number;
 	try {
-		const raw = JSON.parse(readFileSync(join(bridgeDir, "bridge.lock"), "utf8")) as {
+		mtimeMs = statSync(lockPath).mtimeMs;
+	} catch {
+		return null;
+	}
+	const ageMs = Date.now() - mtimeMs;
+	try {
+		const raw = JSON.parse(readFileSync(lockPath, "utf8")) as {
 			pid?: number;
 			label?: string;
 			acquiredAt?: string;
 		};
-		const mtimeMs = statSync(join(bridgeDir, "bridge.lock")).mtimeMs;
 		return {
 			pid: raw.pid ?? 0,
 			label: raw.label ?? "unknown",
 			acquiredAt: raw.acquiredAt ?? new Date(mtimeMs).toISOString(),
-			ageMs: Date.now() - mtimeMs,
+			ageMs,
+			unreadable: false,
 		};
 	} catch {
-		return null;
+		return {
+			pid: 0,
+			label: "",
+			acquiredAt: new Date(mtimeMs).toISOString(),
+			ageMs,
+			unreadable: true,
+		};
 	}
 }
 

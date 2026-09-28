@@ -112,6 +112,48 @@ if (last !== null) {
 	eq("the last summary's files are the ones reported", last.importedFiles, ["b.fbx"]);
 }
 
-console.log(`${passed} passed, ${failures.length} failed (parse summary)`);
+// ---------------------------------------------------------------------------
+// readBridgeLock: a lock that exists but does not parse is still a HELD lock.
+//
+// This is the same defect the unity repo had. readBridgeLock caught everything
+// and returned null on a parse failure, and unity_blender_status derives `busy`
+// from `lock !== null` -- so a truncated lock, which is exactly what a process
+// killed mid-transfer leaves behind, was reported as "both bridges are reachable
+// and idle". The next transfer then serializes behind the corpse anyway, after
+// a long wait, with no explanation.
+// ---------------------------------------------------------------------------
+const { readBridgeLock } = await loadTs("binder/bridge.ts");
+const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+const { tmpdir } = await import("node:os");
+const { join } = await import("node:path");
+
+const bridgeDir = mkdtempSync(join(tmpdir(), "pi-binder-lock-"));
+try {
+	check("no lock at all reads as no lock", readBridgeLock(bridgeDir) === null);
+
+	writeFileSync(join(bridgeDir, "bridge.lock"), JSON.stringify({ pid: 4242, label: "in-flight", acquiredAt: "2026-01-01T00:00:00.000Z" }));
+	const held = readBridgeLock(bridgeDir);
+	check("a held lock is reported", held !== null);
+	check("a held lock carries its pid", held?.pid === 4242, String(held?.pid));
+	check("a held lock carries its label", held?.label === "in-flight", String(held?.label));
+	check("a held lock is not flagged unreadable", held?.unreadable === false, String(held?.unreadable));
+
+	writeFileSync(join(bridgeDir, "bridge.lock"), "{corrupt");
+	const corrupt = readBridgeLock(bridgeDir);
+	check("a corrupt lock is still a held lock", corrupt !== null, "collapsed to null");
+	check("a corrupt lock is flagged unreadable", corrupt?.unreadable === true, String(corrupt?.unreadable));
+	check("a corrupt lock still carries an age, so staleness is judgeable", typeof corrupt?.ageMs === "number");
+
+	writeFileSync(join(bridgeDir, "bridge.lock"), "");
+	const empty = readBridgeLock(bridgeDir);
+	check("an empty lock file is still a held lock", empty?.unreadable === true, String(empty?.unreadable));
+
+	rmSync(join(bridgeDir, "bridge.lock"), { force: true });
+	check("removing the lock clears it", readBridgeLock(bridgeDir) === null);
+} finally {
+	rmSync(bridgeDir, { recursive: true, force: true });
+}
+
+console.log(`${passed} passed, ${failures.length} failed (parse summary + bridge lock)`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);
 process.exit(failures.length === 0 ? 0 : 1);

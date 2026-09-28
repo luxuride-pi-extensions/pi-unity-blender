@@ -52,8 +52,17 @@ function describeStatus(
 	busy: boolean,
 	deadBridges: string[],
 	preconditions: TransferPreconditions | null,
+	unreadableLocks: string[],
 ): string {
 	if (busy) {
+		if (unreadableLocks.length > 0) {
+			return (
+				`${unreadableLocks.join(" and ")} holds a lock file that could not be parsed, so a ` +
+				"request is almost certainly still running -- possibly one that died mid-transfer. " +
+				"Wait and re-check; the lock is reclaimed automatically once it passes the stale " +
+				"threshold, and starting a second transfer now would only queue behind it."
+			);
+		}
 		return (
 			"Another transfer or bridge request is running. Wait for it to finish; both bridges " +
 			"serialize requests and concurrent ones interleave in one shared session."
@@ -348,11 +357,20 @@ export default function unityBlender(pi: {
 				...(blenderBridgeAlive ? [] : ["Blender"]),
 				...(unityBridgeAlive ? [] : ["Unity"]),
 			];
+			const unreadableLocks = [
+				...(blenderLock?.unreadable ? ["Blender"] : []),
+				...(unityLock?.unreadable ? ["Unity"] : []),
+			];
 			// Liveness drives this sentence, not the per-direction checklist.
 			// `preconditions` is null unless a direction was given, so keying off
 			// its problems made the no-argument call report "both reachable" even
 			// with a bridge down.
-			const recommendation = describeStatus(blenderLock !== null || unityLock !== null, deadBridges, preconditions);
+			const recommendation = describeStatus(
+				blenderLock !== null || unityLock !== null,
+				deadBridges,
+				preconditions,
+				unreadableLocks,
+			);
 
 			const result = {
 				blenderBridgeAlive,

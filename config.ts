@@ -21,11 +21,6 @@ export function getBundledSkillsDir(): string {
 	return join(EXTENSION_DIR, "skills");
 }
 
-/** Bundled agent templates, installed by scripts/install-agents.mjs. */
-export function getBundledAgentsDir(): string {
-	return join(EXTENSION_DIR, "agents");
-}
-
 function xdgCacheHome(): string {
 	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
 }
