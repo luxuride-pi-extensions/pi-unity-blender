@@ -316,7 +316,7 @@ function parseExportSummary(stdout: string): ExportSummary | null {
 	return null;
 }
 
-interface ImportSummary {
+export interface ImportSummary {
 	importedNames: string[];
 	materialNames: string[];
 	collectionName: string;
@@ -330,8 +330,12 @@ interface ImportSummary {
  * Same shape as parseExportSummary, but keyed on the keys import_obj.py
  * actually prints. Scans backwards for the last line that parses, because
  * Blender's own chatter can come after the script's output.
+ *
+ * Exported so test/parse-summary.mjs can lock the returned shape down. When
+ * this was private, a field added to the interface and read by the caller
+ * could still be dropped here, and nothing failed.
  */
-function parseImportSummary(stdout: string): ImportSummary | null {
+export function parseImportSummary(stdout: string): ImportSummary | null {
 	const lines = stdout.split("\n");
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
 		const line = (lines[index] ?? "").trim();
@@ -342,11 +346,18 @@ function parseImportSummary(stdout: string): ImportSummary | null {
 			// "nothing landed", which the caller reports -- it is not a parse
 			// failure, so it must not be confused with "no summary at all".
 			if (!Array.isArray(parsed.importedNames)) continue;
+			// Carry EVERYTHING the script printed. Returning only a subset here
+			// made importedFiles and armatures silently empty even though the
+			// script printed them, so a transfer reported "no rig came across"
+			// for a file that in fact carried one.
 			return {
 				importedNames: parsed.importedNames,
 				materialNames: Array.isArray(parsed.materialNames) ? parsed.materialNames : [],
 				collectionName: typeof parsed.collectionName === "string" ? parsed.collectionName : "",
 				vertexTotal: typeof parsed.vertexTotal === "number" ? parsed.vertexTotal : 0,
+				importedFiles: Array.isArray(parsed.importedFiles) ? parsed.importedFiles : [],
+				armatures: Array.isArray(parsed.armatures) ? parsed.armatures : [],
+				flippedRoots: Array.isArray(parsed.flippedRoots) ? parsed.flippedRoots : [],
 			};
 		} catch {
 			// Not our summary; keep scanning upwards.
