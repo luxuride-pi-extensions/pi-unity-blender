@@ -23,6 +23,7 @@ import {
 	describeBlenderInstanceOwnership,
 	getBlenderBridgeDir,
 	getBundledSkillsDir,
+	getManagerPrompt,
 	getStagingDir,
 	getUnityBridgeDir,
 } from "./config.js";
@@ -90,36 +91,24 @@ function clearManagerMode(): boolean {
 }
 
 /**
- * The binder's own root manager agent. It is a child, so the blanket exemption
- * below would otherwise cover it — and it must not be, for the same reason
- * pi-vibe-blender gates `blender-manager` by name for the same reason: a spawned manager is a child
- * that must still DELEGATE, and letting it read a reference image or author a
- * file is exactly the drift the manager role exists to prevent.
- */
-const BINDER_MANAGER_AGENT_NAME = "unity-blender-manager";
-
-/**
  * Whether this session is acting as THE manager, and so is subject to the gate.
  *
- * A spawned child (blender-worker, unity-worker, a critic) is exempt even
- * though the flag is process-wide: those agents MUST author code and look at
- * renders, and they carry an `<active_agent name="...">` tag in their prompt.
- * Gating them would make the delegation this mode exists to cause impossible.
- * The one exception is a spawned MANAGER, which is a child that still has to
- * delegate rather than author, so it is named explicitly instead.
+ * /unity-blender does not spawn a manager -- this session IS the manager, so
+ * the user can watch its todos and progress in the session they are typing in.
+ * That makes the test a single one: the root session in manager mode is the
+ * manager, and ANY child is not.
+ *
+ * A child (blender-worker, unity-worker, a critic) MUST author code and look
+ * at renders, which is exactly what the gate forbids, and it carries an
+ * `<active_agent name="...">` tag in its prompt. Gating those would make the
+ * delegation this mode exists to cause impossible. The exemption is by
+ * STRUCTURE -- being a child at all -- rather than by a named exception: there
+ * is no manager subagent left to name, which is the whole point of the change.
  */
 function isManagerSession(systemPrompt: string): boolean {
 	if (!managerMode) return false;
-	const child = CHILD_AGENT_PROMPT_PATTERN.exec(systemPrompt)?.[1] ?? null;
-	return child === null || child === BINDER_MANAGER_AGENT_NAME;
+	return CHILD_AGENT_PROMPT_PATTERN.exec(systemPrompt) === null;
 }
-
-const MANAGER_ROLE_GUIDANCE = [
-	"You entered by /unity-blender, so this session is the ROUTER: the top level of the transfer hierarchy is the `unity-blender-manager` subagent, and it owns the whole job. Your job is to launch it with the user's task, let it run, and relay what it returns — call subagents_enable (no arguments) once, then spawn it with a self-contained task. Do not plan modules, write briefs, or transfer geometry yourself.",
-	"An enforced gate blocks your `write`/`edit` and any `read` of an image (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`), so a direct approach is a dead end. It lifts at `/unity-blender-exit` or on the next session start. The `unity_*`, `blender_*` and `unity_blender_*` tools remain usable directly — they are for reading state, and the gate does not touch them.",
-	"You need none of the rest of this guidance. Which agent owns which kind of work, the reference and caption rules, the image budget, the one-Blender rule, the transfer loss modes and the loop all live in the manager's OWN prompt, which is longer and more precise than anything reconstructed here — and a spawned manager does not inherit this session's prompt, so that is where those facts have to be. Do not re-derive them here, and do not paraphrase them into a brief: the manager already holds them.",
-	"Do not restate tool schemas in prose. Use the tool definitions directly.",
-].join(" ");
 
 /**
  * One sentence an agent can act on. Liveness leads, because that is what
@@ -590,7 +579,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			return {
 				block: true,
 				reason:
-					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. If you need to plan a whole build rather than drive one tool at a time, spawn `unity-blender-manager` — the top level of this hierarchy — and let it run the transfer end to end. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
+					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. This session IS the manager — you were not handed a job to relay, and the subagents you spawn are the ones that do the work. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
 			};
 		}
 
@@ -620,16 +609,20 @@ export default function unityBlender(pi: ExtensionAPI) {
 		};
 	});
 
-	// The manager-role rules go into a system-prompt section, not a per-turn
-	// message: they are constant, and pi diffs system sections per run, so on
+	// The manager's prompt goes into a system-prompt section, not a per-turn
+	// message: it is constant, and pi diffs system sections per run, so on
 	// steady-state turns this costs nothing and never lands after the user's
 	// prompt the way an appended message would.
+	//
+	// The prompt is the WHOLE of the manager's instructions now. There is no
+	// separate router blob, because there is no router: this session is the
+	// manager, and everything it needs to know belongs in one place.
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!isManagerSession(ctx.getSystemPrompt())) return undefined;
 		// The mutable sections live on the EVENT. Reaching for
 		// ctx.systemPromptOptions is the first thing that looks plausible and
 		// does not exist on ExtensionContext.
-		event.systemPromptOptions.sections.unity_blender_manager = MANAGER_ROLE_GUIDANCE;
+		event.systemPromptOptions.sections.unity_blender_manager = getManagerPrompt();
 		return undefined;
 	});
 }

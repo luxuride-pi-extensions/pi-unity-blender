@@ -8,7 +8,7 @@
  * publish them, and talks to both queues with its own small client.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -20,6 +20,42 @@ const APP_NAME = "unity-blender";
 /** Bundled skills, published to pi through the resources_discover hook. */
 export function getBundledSkillsDir(): string {
 	return join(EXTENSION_DIR, "skills");
+}
+
+/**
+ * The manager's own prompt, as a system-prompt section.
+ *
+ * /unity-blender does not spawn a manager: the command session IS the
+ * manager, so its progress and todos are the ones the user is watching. The
+ * prompt therefore has to reach the session that ran the command, and
+ * `before_agent_start` is the only route -- pi's RegisteredCommand has no way
+ * to spawn an agent (types.d.ts: name, sourceInfo, description,
+ * getArgumentCompletions, handler).
+ *
+ * Read from the file rather than inlined, so the manager prompt stays one
+ * editable markdown source instead of a 294-line string literal. The file is
+ * deliberately NOT installed as an agent template, so nothing can spawn it and
+ * the shadow copy that would drift cannot exist.
+ *
+ * Frontmatter is stripped: the `tools:` and `extensions:` lines are an agent
+ * template's contract, and a command session gets its tools from the extension
+ * it is already running, so a stray `tools:` line in a system prompt is both
+ * inert and misleading. A missing or unreadable file yields a string that says
+ * so, because a manager that silently runs on a few lines of generic guidance
+ * is worse than one that reports the prompt is gone.
+ */
+export function getManagerPrompt(): string {
+	try {
+		const source = readFileSync(join(EXTENSION_DIR, "agents", "unity-blender-manager.md"), "utf8");
+		return source.replace(/^---[\s\S]*?\n---\n/, "").trim();
+	} catch (error) {
+		return (
+			"The manager prompt could not be read from agents/unity-blender-manager.md, so this " +
+			`session has no detailed manager instructions (${error instanceof Error ? error.message : String(error)}). ` +
+			"Say so plainly and ask the user to check that file exists; do not fall back to guessing at " +
+			"which agent owns which work."
+		);
+	}
 }
 
 function xdgCacheHome(): string {

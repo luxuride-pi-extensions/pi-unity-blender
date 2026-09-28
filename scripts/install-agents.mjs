@@ -20,7 +20,7 @@
  *   PI_TODO_ENTRY   default $PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,7 +140,12 @@ const extensionDirs = [
 	.filter((dir) => existsSync(dir));
 
 const targets = [
-	{ file: "unity-blender-manager.md", extensionDir: extensionDirs.join(", ") },
+	// `unity-blender-manager.md` is deliberately NOT here. The /unity-blender
+	// command session IS the manager, so there is nothing to install: a
+	// spawnable copy would be a second manager whose prompt drifts from the
+	// one the user is actually watching. config.ts getManagerPrompt() reads
+	// the file in place instead.
+	//
 	// Reads reference images with `read` and needs no extension tool, so it
 	// declares no `extensions:` line. It is listed here so the installer
 	// owns the copy; the stamp is a no-op on a file with nothing to stamp.
@@ -151,6 +156,19 @@ const write = process.argv.includes("--write");
 const agentDir = join(PI_AGENT_DIR, "agents");
 let problems = 0;
 const todoEntry = resolveTodoEntry();
+
+/**
+ * Files this repo used to install and no longer does.
+ *
+ * Deleting them is part of installing, not a chore alongside it. The point of
+ * the change is that no spawnable `unity-blender-manager` exists any more --
+ * and an installer that only ever adds files would leave the previously
+ * installed copy sitting in ~/.pi/agent/agents forever, where it stays fully
+ * spawnable and fully out of date. The failure is silent and nasty: the user
+ * watches the todos in the command session while a stale shadow manager sits
+ * there waiting to be spawned, and the two prompts disagree.
+ */
+const retired = ["unity-blender-manager.md"];
 
 for (const { file, extensionDir } of targets) {
 	const source = join(TEMPLATES, file);
@@ -226,6 +244,17 @@ for (const { file, extensionDir } of targets) {
 	} else {
 		console.log(`${file} -> ${destination}\n  extensions: ${extensions}`);
 	}
+}
+
+for (const file of retired) {
+	const destination = join(agentDir, file);
+	if (!existsSync(destination)) continue;
+	if (!write) {
+		console.log(`retired ${file} -> ${destination} (still installed; re-run with --write)`);
+		continue;
+	}
+	unlinkSync(destination);
+	console.log(`removed ${destination} (no longer installed; the /unity-blender session is the manager)`);
 }
 
 if (!write) {
