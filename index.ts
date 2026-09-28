@@ -94,10 +94,48 @@ const IMAGE_READ_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp",
  * whole point of the command-session design.
  */
 const managerMode = core.createManagerMode({
-	// Custom tools are not listed, and that is deliberate rather than an
-	// omission: a custom tool is not a `write` or a `read`, so the gate's own
-	// refusals below never match one and the allowlist would only be a second
-	// place to forget a tool.
+	// The gate is deny-by-default, so this list is load-bearing: a tool absent
+	// here is REFUSED, and only the refusals below can let one through. It
+	// matches the `tools:` line in agents/unity-blender-manager.md (line 31),
+	// which is what pi actually hands this session — see test/allowlists.mjs,
+	// which fails if the two drift.
+	allowedTools: [
+		// Delegation and supervision.
+		"subagent",
+		"subagents_enable",
+		"contact_supervisor",
+		// Planning and reading agent definitions to write a brief with.
+		"todo",
+		"read",
+		"grep",
+		"find",
+		"ls",
+		"ask_user_question",
+		// The transfer itself, and the read-only inspection either side needs to
+		// decide what to transfer. `unity_source_models` is included because
+		// choosing between the source file and a re-exported OBJ is this
+		// session's judgement, not a worker's.
+		"unity_blender_status",
+		"unity_blender_transfer",
+		"unity_source_models",
+		"unity_workspace_init",
+		"unity_scene_info",
+		"unity_session_context",
+		"unity_bridge_status",
+		"unity_bones",
+		"unity_inspect",
+		"unity_vrc",
+		"unity_world",
+		"unity_module_revert",
+		"unity_log_critique",
+		"blender_workspace_init",
+		"blender_scene_info",
+		"blender_add_reference",
+		"blender_session_context",
+		"blender_bridge_status",
+		"blender_module_revert",
+		"blender_log_critique",
+	],
 	onGateMessage: (event) => {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			return {
