@@ -566,31 +566,28 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// extension supplies the three refusals, because they name agents only this
 	// manager can spawn.
 
-	pi.on("before_agent_start", () => {
-		if (!managerMode.isEngaged()) return undefined;
-		return {
-			message: {
-				customType: "unity_blender_context",
-				content: unityBlenderGuidance,
-				display: true,
-			},
-		};
-	});
-
-	// The manager's prompt goes into a system-prompt section, not a per-turn
-	// message: it is constant, and pi diffs system sections per run, so on
-	// steady-state turns this costs nothing and never lands after the user's
-	// prompt the way an appended message would.
+	// Injection goes through the shared core, the same as the other two
+	// managers, but with two differences that are real rather than incidental
+	// and are therefore named as options:
 	//
-	// The prompt is the WHOLE of the manager's instructions now. There is no
-	// separate router blob, because there is no router: this session is the
-	// manager, and everything it needs to know belongs in one place.
-	pi.on("before_agent_start", (event, ctx) => {
-		if (!managerMode.isManagerSession(ctx.getSystemPrompt())) return undefined;
-		// The mutable sections live on the EVENT. Reaching for
-		// ctx.systemPromptOptions is the first thing that looks plausible and
-		// does not exist on ExtensionContext.
-		event.systemPromptOptions.sections.unity_blender_manager = getManagerPrompt();
-		return undefined;
-	});
+	//  - `staticContent`, because there is nothing to prefetch. This manager's
+	//    live state arrives from ONE `unity_blender_status` call that reports
+	//    both sides, and the guidance tells the manager to make exactly that
+	//    call. Fetching a second time would spend a bridge round trip restating
+	//    what a tool call is about to return anyway.
+	//  - `sectionReachesChildren: false`, because unlike the other two this
+	//    prompt is the connector's own instructions, not one side's procedure,
+	//    and the workers here are spawned with agent definitions that already
+	//    state which side they are on.
+	pi.on(
+		"before_agent_start",
+		core.createContextInjection({
+			section: "unity_blender_manager",
+			customType: "unity_blender_context",
+			shouldInject: () => managerMode.isEngaged(),
+			getPrompt: getManagerPrompt,
+			staticContent: unityBlenderGuidance,
+			sectionReachesChildren: false,
+		}),
+	);
 }
