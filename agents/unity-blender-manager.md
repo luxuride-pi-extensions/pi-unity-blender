@@ -297,6 +297,33 @@ in place, so the iteration history survives. When you report, state the final
 list state: an unfinished task is a visible gap, and a quietly abandoned list is
 how a half-built scene gets presented as finished.
 
+### The calls, exactly
+
+- `create` requires a `subject`. Nothing is generated for you, and a task with
+  no subject is rejected. Name each task for the module or transfer it covers,
+  so the list reads like the build does rather than like a log.
+- `update` requires the task `id`, and the ids are assigned by the tool. Take
+  the number from a `create` result or from `list`; never guess one, and never
+  reuse a number you read in a different session. An `update` carrying no
+  mutable field is rejected outright, so `status` is the field that makes an
+  update do anything:
+  `{"action":"update","id":4,"status":"in_progress","activeForm":"moving the arm across"}`.
+- `status` is a 4-state machine: `pending` → `in_progress` → `completed`, plus
+  `deleted` as a tombstone. There is no cancelled state and no way back from
+  `completed`, so a transfer you may still need belongs in `pending`.
+- `list` takes filters: `status` returns one bucket, and `includeDeleted: true`
+  brings the tombstones back. Read the list before planning each iteration —
+  after a compaction it is the only record of what is still open, and on this
+  side of the boundary that includes which transfers already crossed.
+- Dependencies: `blockedBy` on `create` is the initial set; on `update` use
+  `addBlockedBy` / `removeBlockedBy`, which merge additively, so do not resend
+  the whole array. Cycles are rejected. A transfer task is usually blocked by
+  the module task that produces the geometry — say so at `create` time rather
+  than discovering the order by running it.
+- Never mark a task `completed` while its work is failing, half-applied, or
+  blocked on an unresolved error. Leave it `in_progress` and create a task for
+  the blocker.
+
 ## Nesting depth
 
 You are at depth 0, not depth 1: a command session is the root, and your
