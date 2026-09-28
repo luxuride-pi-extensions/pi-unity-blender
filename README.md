@@ -33,16 +33,21 @@ node scripts/install-agents.mjs            # dry run: print resolved paths
 node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
 ```
 
-`unity-blender-manager` is the ROOT agent for work in a live Blender session, a
-live Unity Editor, or both: it is not a Unity or a Blender subagent, it holds
-all three extensions on its `extensions:` line, and it owns both build loops as
-well as what crosses between them. All three paths are required — a foreground
+`unity-blender-manager` is the TOP-LEVEL agent entered from `/unity-blender`,
+for work in a live Blender session, a live Unity Editor, or both. It is a sibling
+of `unity-manager` (`/unity`) and `blender-manager` (`/blender`), not their
+parent: each of the three is spawned straight from its own command, and each one
+then owns its own subagents. It holds all three extensions on its `extensions:`
+line, and it owns both build loops as well as what crosses between them. All three paths are required — a foreground
 child does not load ambient parent extensions, so a tool named in `tools:` that
 no listed extension registers is requested and never provided.
 
-It replaces `unity-manager` and `blender-manager`, which are retired: those two
-roles are now one agent, and its `allowedAgents` is the flat union of their
-families. The prompt deliberately contains no build procedure. It routes to the
+What is merged here is the CROSS-APPLICATION role, not the per-side ones:
+`unity-manager` and `blender-manager` still exist as the top-level agents of
+their own side, this agent's `allowedAgents` is the flat union of all three
+families, and this one is the agent to reach when a task touches both
+applications or moves geometry between them. The prompt deliberately contains
+no build procedure. It routes to the
 per-side skills (`unity-live-state`, `blender-modules`, `unity-csharp`, …) and
 to `unity-blender-transfer`, which carry the loops and the failure modes. A
 copied loop goes stale the moment either extension is upgraded, and a stale
@@ -181,7 +186,7 @@ Both bridge directories can point at the same place, but they are independent
 queues: the binder talks to whichever editor is open and reports the other as
 dead. That is a correct report, not a bug.
 
-## One Blender per session, owned by the root
+## One Blender per session, owned by the root session
 
 Every process in a session's delegation tree — the manager, its workers, the
 critics — talks to the **same** Blender, and the root pi process owns it. Three

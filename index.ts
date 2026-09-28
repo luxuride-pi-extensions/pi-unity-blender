@@ -92,7 +92,7 @@ function clearManagerMode(): boolean {
 /**
  * The binder's own root manager agent. It is a child, so the blanket exemption
  * below would otherwise cover it — and it must not be, for the same reason
- * pi-vibe-blender gates `blender-manager` by name: a spawned manager is a child
+ * pi-vibe-blender gates `blender-manager` by name for the same reason: a spawned manager is a child
  * that must still DELEGATE, and letting it read a reference image or author a
  * file is exactly the drift the manager role exists to prevent.
  */
@@ -115,11 +115,11 @@ function isManagerSession(systemPrompt: string): boolean {
 }
 
 const MANAGER_ROLE_GUIDANCE = [
-	"You are in transfer manager mode, entered by /unity-blender: you hold the user's goal, the task breakdown, and each subagent's brief and report.",
-	"You do NOT author Blender bpy, Unity C#, or any other file yourself. An enforced gate blocks your `write`/`edit` and any `read` of an image (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`), so a direct approach is a dead end. Delegate to the subagents that do own that work: `blender-worker` authors and runs bpy in Blender, `blender-critic` judges how a render LOOKS, `blender-manager` can plan and run a whole Blender build end to end, and on the Unity side `unity-worker` authors and runs C# and `unity-critic` judges the scene. The `unity_*` and `blender_*` tools remain usable directly — they are for reading state, and the gate does not touch them.",
+	"You entered by /unity-blender, so this session is the ROUTER: the top level of the transfer hierarchy is the `unity-blender-manager` subagent, and it owns the whole job. Your job is to launch it with the user's task, let it run, and relay what it returns — call subagents_enable (no arguments) once, then spawn it with a self-contained task. Do not plan modules, write briefs, or transfer geometry yourself.",
+	"You do NOT author Blender bpy, Unity C#, or any other file yourself. An enforced gate blocks your `write`/`edit` and any `read` of an image (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`), so a direct approach is a dead end. The manager delegates to the agents that own that work: `blender-worker` authors and runs bpy in Blender, `blender-critic` judges how a render LOOKS, `unity-worker` authors and runs C# and `unity-critic` judges the scene. It may also spawn `blender-manager` for a whole Blender-only build and `unity-manager` for a whole Unity-only build; each of those is the top level of its own side and runs the agents below it. The `unity_*` and `blender_*` tools remain usable directly — they are for reading state, and the gate does not touch them.",
 	"A reference image is a worker's and a critic's input, never yours. Register it with `blender_add_reference` (it copies the file into `<workspace>/references/` and requires a `caption`, because you cannot read the image yourself), then pass the registered path AND your caption into every affected subagent brief. Never open the image to describe it — the caption is the only channel, which is exactly why the tool demands one.",
 	"Per critic, one render plus one reference image, never a third: image payloads persist in the transcript and are resent every request, so a few extra reads make the provider reject the entire conversation. `blender_scene_info`, `unity_scene_info` and `unity_blender_status` are text and cost nothing against that budget, so prefer them to a second look.",
-	"The gate lifts at /unity-blender-exit or on the next session start. If the user asks for something plainly unrelated to a transfer that needs you to write or edit files, say once, in one sentence, that you are still in transfer manager mode and that /unity-blender-exit lifts it, then carry on with whatever transfer work is still open. Mention it at most once per session.",
+	"Call subagents_enable before the first spawn: a fresh session does not have the subagent tool active until you do. The gate lifts at /unity-blender-exit or on the next session start. If the user asks for something plainly unrelated to a transfer that needs you to write or edit files, say once, in one sentence, that you are still in transfer manager mode and that /unity-blender-exit lifts it, then carry on with whatever transfer work is still open. Mention it at most once per session.",
 	"Do not restate tool schemas in prose. Use the tool definitions directly.",
 ].join(" ");
 
@@ -592,7 +592,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			return {
 				block: true,
 				reason:
-					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. If you need to plan a whole build rather than drive one tool at a time, spawn `blender-manager` or `unity-manager` and let them run it end to end. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
+					"Manager role: do not author files. Blender bpy belongs to a `blender-worker` subagent and Unity C# to a `unity-worker`; spawn one with a compact brief (goal, object or GameObject names, acceptance criteria, workspace + module name) and read only its returned report. If you need to plan a whole build rather than drive one tool at a time, spawn `unity-blender-manager` — the top level of this hierarchy — and let it run the transfer end to end. If the file is unrelated to a transfer — project files, a config, a script of your own — say so and ask the user to run /unity-blender-exit, which lifts this gate.",
 			};
 		}
 
