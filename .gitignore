@@ -1,0 +1,32 @@
+# pi-unity-blender — a TypeScript pi extension (the /unity-blender binder).
+# Not a Unity or Blender project, so no engine-specific ignores are needed.
+
+node_modules/
+
+# Transfer staging. The staging dir is an XDG cache path by default, but
+# PI_UNITY_BLENDER_STAGING_DIR can point it inside the tree. Staged FBX/OBJ files
+# are copies of a user's assets and must never be committed.
+.staging/
+staging/
+.transfers.log
+*.fbx
+*.obj
+*.mtl
+
+# Bridge scratch
+*.tmp
+heartbeat
+*.lock
+
+*.dll
+*.exe
+*.pdb
+*.log
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
