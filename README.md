@@ -181,6 +181,49 @@ Both bridge directories can point at the same place, but they are independent
 queues: the binder talks to whichever editor is open and reports the other as
 dead. That is a correct report, not a bug.
 
+## One Blender per session, owned by the root
+
+Every process in a session's delegation tree — the manager, its workers, the
+critics — talks to the **same** Blender, and the root pi process owns it. Three
+things hold that together, and none of them is the manager behaving itself:
+
+1. **The instance id is inherited, never minted per process.** `config.ts`
+   resolves `PI_BLENDER_INSTANCE_ID` at *module load* and publishes it into
+   `process.env`. pi-subagents runs children in-process, so a subagent
+   re-publishes the value it just inherited. Publishing lazily on first use
+   would leave a subagent spawned early in the session free to mint its own id,
+   and therefore its own window.
+2. **The launch is claimed across processes.**
+   `pi-vibe-blender/launch.ts` `tryClaimLaunch()` creates `<bridgeDir>/launch.claim`
+   with `wx` — the create *is* the lock. `bridgeLaunchStarted` is per-process
+   module state and starts `false` in every child, so without that claim a
+   manager and its three workers would each launch a window on their first
+   `blender_*` call.
+3. **The binder publishes too.** Before this, the binder only *read* the id, so
+   a process that loaded it before pi-vibe-blender resolved the bridge ROOT
+   instead of the instance dir and reported the bridge dead while Blender was up
+   one level down. Load order alone could cause it.
+
+`unity_blender_status` reports the owner as `blenderInstance`:
+
+```json
+"blenderInstance": {
+  "instanceId": "35bea7dda255", "rootInstanceId": "35bea7dda255",
+  "isRoot": true, "bridgeDir": ".../bridge/35bea7dda255", "pinned": false
+}
+```
+
+`isRoot: false` is normal in a subagent and is not a problem. The field that
+matters is `instanceId !== rootInstanceId`, which means this process is
+addressing a *different* Blender than the session's owner — the one case where a
+second window is a real defect, and previously the only way to notice was to
+compare directory paths by eye.
+
+Setting `PI_BLENDER_BRIDGE_DIR` by hand switches the whole scheme off
+(`pinned: true`): no per-instance subdir, so ownership is a property of the
+directory rather than the process, and `isRoot` is reported `false` rather than
+claiming an identity the layout cannot support.
+
 ## Known limits
 
 - **Neither leg has been run end-to-end against live applications.** Both
