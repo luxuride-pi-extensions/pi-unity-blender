@@ -52,6 +52,71 @@ export interface UnitySession {
 	selection: string[];
 }
 
+/** One side's live session, or the reason it could not be read. */
+export type SideSession =
+	| { ok: true; blender: BlenderSession }
+	| { ok: true; unity: UnitySession }
+	| { ok: false; error: string };
+
+/** The message text of a thrown value, never "[object Object]". */
+export function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Both live sessions, read in parallel, each independently fallible.
+ *
+ * The independence is the point: a user with only Blender open must still get
+ * their Blender state, and a dead bridge must not blank the other side's. A
+ * Promise.all would throw away the side that worked, which is the same
+ * all-or-nothing reporting the precondition checklist exists to avoid.
+ *
+ * `alive` gates the request rather than the report. A request to a bridge with
+ * no poller takes a bridge lock and then waits out the full cold-start timeout
+ * before failing, so probing one would make the cheap status call the slowest
+ * call in the toolset and defeat its purpose. A side already known to be down
+ * gets the reason immediately.
+ *
+ * A live bridge can still fail its read -- it may be mid-transfer, or the
+ * request may time out -- and that failure is reported per side rather than
+ * thrown, for the same independence reason.
+ */
+export async function readBothSessions(alive: {
+	blender: boolean;
+	unity: boolean;
+}): Promise<{ blender: SideSession; unity: SideSession }> {
+	const skip = (side: string): SideSession => ({
+		ok: false,
+		error: `${side} bridge is not answering, so its session state is unavailable.`,
+	});
+	// Written out per side rather than through a generic helper: the result is a
+	// union keyed by which side produced it, and a spread of a
+	// `BlenderSession | UnitySession` into a `{ ok: true }` variant is exactly
+	// the cast TypeScript is right to reject -- it cannot tell which key the
+	// spread produced, so a swapped side would typecheck.
+	const readBlender = async (isAlive: boolean): Promise<SideSession> => {
+		if (!isAlive) return skip("Blender");
+		try {
+			return { ok: true, blender: await readBlenderSession() };
+		} catch (error) {
+			return { ok: false, error: messageOf(error) };
+		}
+	};
+	const readUnity = async (isAlive: boolean): Promise<SideSession> => {
+		if (!isAlive) return skip("Unity");
+		try {
+			return { ok: true, unity: await readUnitySession() };
+		} catch (error) {
+			return { ok: false, error: messageOf(error) };
+		}
+	};
+	const [blender, unity] = await Promise.all([
+		readBlender(alive.blender),
+		readUnity(alive.unity),
+	]);
+	return { blender, unity };
+}
+
 /**
  * Check everything that can be checked cheaply, and report all problems at
  * once. Reporting them together matters: a user who has neither bridge running
@@ -100,7 +165,16 @@ export async function checkTransferPreconditions(
 	return { blenderBridgeAlive, unityBridgeAlive, blender, unity, problems };
 }
 
-async function readBlenderSession(): Promise<BlenderSession> {
+/**
+ * Read the live Blender session: which .blend is open, whether it has unsaved
+ * changes, and what is selected.
+ *
+ * Exported, not private, because `unity_blender_status` needs the same three
+ * facts and a second implementation would drift. The isDirty flag matters here
+ * specifically: only what is SAVED crosses a transfer, so an open dirty .blend
+ * is a request that would silently export stale geometry.
+ */
+export async function readBlenderSession(): Promise<BlenderSession> {
 	const context = await requestBridge<{
 		blendPath: string | null;
 		isDirty: boolean;
@@ -119,7 +193,8 @@ async function readBlenderSession(): Promise<BlenderSession> {
 	};
 }
 
-async function readUnitySession(): Promise<UnitySession> {
+/** Read the live Unity Editor session: project, active scene, and selection. */
+export async function readUnitySession(): Promise<UnitySession> {
 	const context = await requestBridge<{
 		projectPath: string;
 		scene: { name: string };

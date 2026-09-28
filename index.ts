@@ -31,6 +31,7 @@ import { detectBlender, detectUnity } from "./binder/editors.js";
 import {
 	checkTransferPreconditions,
 	describeTransferScope,
+	readBothSessions,
 	transferBlenderToUnity,
 	transferUnityToBlender,
 	type TransferDirection,
@@ -164,6 +165,11 @@ const unityBlenderGuidance = [
 	"pi-unity-blender moves meshes and materials between a live Blender session and a live Unity Editor.",
 	"Both applications must already be open with their pi bridges loaded: check `unity_blender_status` first,",
 	"and it reports exactly which side is missing rather than failing halfway through a transfer.",
+	"That status also carries the live session state of both sides -- `blenderSession` (saved .blend path,",
+	"isDirty, active object, selection) and `unitySession` (project path, active scene, selection) -- so one",
+	"call tells you what is open and what is selected. Do not reach for a separate session-context tool to",
+	"learn it. `isDirty: true` means the .blend has unsaved changes: only SAVED geometry crosses, so save first.",
+	"A side reported `{ ok: false, error }` is not answering, and the other side's state is still valid.",
 	"Mesh geometry, UVs, material slots, and base texture images cross. Material *graphs* do not: Blender's",
 	"node trees and Unity's shader graphs are flattened to the properties the exchange format can carry, so",
 	"always verify materials on the receiving side.",
@@ -386,9 +392,11 @@ export default function unityBlender(pi: ExtensionAPI) {
 		name: "unity_blender_status",
 		label: "Unity / Blender bridge status",
 		description:
-			"Report whether the Blender and Unity pi bridges are alive, where each editor binary was " +
-			"found (env override, flatpak, Hub directory, or PATH -- neither is necessarily on PATH), " +
-			"which bridge is locked and for how long, and every precondition not yet met for a transfer. " +
+			"Report whether the Blender and Unity pi bridges are alive, what each side currently has " +
+			"open (the saved .blend and its selection, the Unity project, active scene and selection), " +
+			"where each editor binary was found (env override, flatpak, Hub directory, or PATH -- " +
+			"neither is necessarily on PATH), which bridge is locked and for how long, which Blender " +
+			"instance this session shares, and every precondition not yet met for a transfer. " +
 			"Call this before a transfer instead of discovering a missing Editor after a long cold start.",
 		parameters: Type.Object({
 			direction: Type.Optional(
@@ -423,6 +431,15 @@ export default function unityBlender(pi: ExtensionAPI) {
 			const [blender, unity] = await Promise.all([detectBlender(), detectUnity()]);
 			const blenderLock = readBridgeLock(getBlenderBridgeDir());
 			const unityLock = readBridgeLock(getUnityBridgeDir());
+
+			// The live session state, which is the part that was missing: bridges
+			// being up says nothing about what is open inside them. Each side is
+			// read independently, so a user with only Blender open still gets
+			// their Blender state and Unity's absence does not blank it.
+			const { blender: blenderSession, unity: unitySession } = await readBothSessions({
+				blender: blenderBridgeAlive,
+				unity: unityBridgeAlive,
+			});
 
 			const deadBridges = [
 				...(blenderBridgeAlive ? [] : ["Blender"]),
@@ -459,6 +476,12 @@ export default function unityBlender(pi: ExtensionAPI) {
 				blenderInstance: describeBlenderInstanceOwnership(),
 				blenderLock,
 				unityLock,
+				// What each side has open, or why it could not be read. Blender's
+				// isDirty is called out in the guidance because only SAVED work
+				// crosses: a dirty .blend would export stale geometry, and the
+				// transfer result says so in `notes` rather than failing.
+				blenderSession,
+				unitySession,
 				busy: blenderLock !== null || unityLock !== null,
 				preconditions,
 				recommendation,
