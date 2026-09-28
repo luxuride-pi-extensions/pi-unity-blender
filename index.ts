@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
+	describeBlenderInstanceOwnership,
 	getBlenderBridgeDir,
 	getBundledSkillsDir,
 	getStagingDir,
@@ -450,6 +451,12 @@ export default function unityBlender(pi: ExtensionAPI) {
 				blenderBridgeDir: getBlenderBridgeDir(),
 				unityBridgeDir: getUnityBridgeDir(),
 				stagingDir: getStagingDir(),
+				// Who owns that Blender, and whether this process is the owner.
+				// A second window is invisible in a path, and the question a
+				// user actually has when they see one is "is it mine?" — the
+				// instance id answers it by comparison. See the comment on
+				// describeBlenderInstanceOwnership in config.ts.
+				blenderInstance: describeBlenderInstanceOwnership(),
 				blenderLock,
 				unityLock,
 				busy: blenderLock !== null || unityLock !== null,
