@@ -181,6 +181,7 @@ machine. Every variable the code reads, in the order it matters:
 | `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Unity request/response queue. |
 | `PI_UNITY_BLENDER_STAGING_DIR` | `$XDG_CACHE_HOME/unity-blender/staging` | Transfer staging. **Keep this in the cache** — the Blender flatpak sandbox cannot read `/tmp`. |
 | `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS` | `10000` | How old a bridge heartbeat may be before the bridge counts as dead. |
+| `PI_TODO_ENTRY` | `$PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts` | Install-time only. The one agent installed here names `todo` in its `tools:`, so a child gets a `todo` it can never call if the package is not in that npm tree. |
 
 Both bridge directories can point at the same place, but they are independent
 queues: the binder talks to whichever editor is open and reports the other as
