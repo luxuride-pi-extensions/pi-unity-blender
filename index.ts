@@ -632,9 +632,11 @@ export default function unityBlender(pi: ExtensionAPI) {
 
 	// A new session is a fresh start: the binder goes back to silent until the
 	// user runs /unity-blender or a unity_blender_* tool again, and so does the
-	// gate — a session that ends must not leave the next one restricted.
-	pi.on("session_start", () => {
-		managerMode.reset();
+	// gate — a session that ends must not leave the next one restricted. A
+	// /reload is not a new session and keeps both; see createManagerMode's
+	// reset().
+	pi.on("session_start", (event) => {
+		managerMode.reset(event?.reason);
 	});
 
 	// Manager-role enforcement: the parent session plans, delegates, and reads
