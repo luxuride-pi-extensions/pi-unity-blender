@@ -52,6 +52,41 @@ const core = loadManagerCore();
 
 const TRANSFER_DIRECTIONS = ["blender-to-unity", "unity-to-blender"] as const;
 
+/**
+ * The agents this manager may spawn.
+ *
+ * The `allowedAgents:` line in agents/unity-blender-manager.md (line 65) minus
+ * the manager itself, which is the one asking. That line is what pi offers the
+ * session; this set is what the gate enforces, so the two must be edited
+ * together — test/agent-rosters.mjs compares them and fails on drift.
+ *
+ * Both sides' agents are here because a transfer genuinely needs both: a
+ * describer for the source, then a worker on whichever side is being edited. A
+ * roster of one side's agents would refuse the half of the job this session
+ * exists to do.
+ */
+const UNITY_BLENDER_MANAGER_ROSTER = new Set([
+	// Unity side.
+	"unity-worker",
+	"unity-critic",
+	"unity-diagnostician",
+	"unity-finalizer",
+	"unity-reference-describer",
+	"vrchat-unity-avatar",
+	"vrchat-unity-world",
+	// Blender side.
+	"blender-worker",
+	"blender-script-runner",
+	"blender-merger",
+	"blender-critic",
+	"blender-diagnostician",
+	"blender-finalizer",
+	"blender-camera-aligner",
+	"blender-reference-describer",
+	// Both sides at once.
+	"unity-blender-reference-describer",
+]);
+
 function isTransferDirection(value: unknown): value is TransferDirection {
 	return TRANSFER_DIRECTIONS.includes(value as TransferDirection);
 }
@@ -135,6 +170,12 @@ const managerMode = core.createManagerMode({
 		"blender_module_revert",
 		"blender_log_critique",
 	],
+	// The roster's RULE is the core's; only the names are ours. This manager had
+	// no roster at all, so it could spawn any agent in the session — including a
+	// writer that walks straight past the write/edit refusal below. The two sides'
+	// agents are both here because a transfer genuinely needs both: the describer
+	// for the source, then a worker on whichever side is being edited.
+	agentRoster: [...UNITY_BLENDER_MANAGER_ROSTER],
 	onGateMessage: (event) => {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			return {
