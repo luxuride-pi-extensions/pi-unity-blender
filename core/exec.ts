@@ -80,7 +80,12 @@ export async function execCommand(
 				stderr,
 				// 127 is the conventional "command not found". Without this an
 				// ENOENT spawn (code null, killed false) would look like success.
-				code: spawnError ? 127 : (code ?? (spawnError ? 127 : 1)),
+				//
+				// A null code with no spawn error means the process died on a
+				// signal rather than exiting, so 1; there is no `?? 0` here,
+				// because a signal death is a failure and reporting it as success
+				// is what a caller's `code !== 0` check cannot catch.
+				code: spawnError ? 127 : (code ?? 1),
 				killed: code === null,
 			});
 		});
