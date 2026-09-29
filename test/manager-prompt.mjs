@@ -102,9 +102,9 @@ check("no load-failure notice", !prompt.includes("could not be read from"), "a s
 
 // --- 7. a missing side degrades LOUDLY, not silently -------------------------
 
-const sideExtensionMissing = !existsSync(join(PI_AGENT_DIR, "extensions", "vibe-blender"));
+const sideExtensionMissing = !existsSync(join(PI_AGENT_DIR, "extensions", "pi-blender"));
 if (sideExtensionMissing) {
-	console.log("skipping the degraded-path check: vibe-blender is not installed, so the notice in case 6 is expected.");
+	console.log("skipping the degraded-path check: pi-blender is not installed, so the notice in case 6 is expected.");
 } else {
 	const { getManagerPrompt: reload } = await loadTs("config.ts");
 	process.env.PI_AGENT_DIR = join(PI_AGENT_DIR, "definitely-not-here");

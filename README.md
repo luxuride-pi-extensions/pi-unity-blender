@@ -11,8 +11,8 @@ MIT.
 
 Both applications open, with their pi bridges loaded. That means:
 
-- `pi-vibe-blender` installed and the `.blend` open in Blender
-- `pi-vibe-unity` installed and a project open in Unity
+- `pi-blender` installed and the `.blend` open in Blender
+- `pi-unity` installed and a project open in Unity
 
 Neither is a dependency of this extension. Call `unity_blender_status` first —
 it reports every unmet precondition at once, so you learn about the missing
@@ -26,7 +26,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/unity-blender
 
 Same two caveats as the other extensions: `node_modules/typebox` symlinks into
 pi's own install, and agent templates must be installed from the **binder's**
-repo — not pi-vibe-unity's installer, which would race over the same file.
+repo — not pi-unity's installer, which would race over the same file.
 
 ```bash
 node scripts/install-agents.mjs            # dry run: print resolved paths
@@ -81,7 +81,7 @@ protocol: a request JSON appears in a directory, the application writes a
 response JSON back. So `binder/bridge.ts` speaks that protocol directly and is
 the single client for **both** bridges.
 
-Importing `pi-vibe-unity`'s and `pi-vibe-blender`'s internals would couple this
+Importing `pi-unity`'s and `pi-blender`'s internals would couple this
 extension to their request shapes, their environment variables, and their
 install layout — each of which can change or be removed independently. The
 coupling buys nothing; the protocol is the contract.
@@ -177,8 +177,8 @@ machine. Every variable the code reads, in the order it matters:
 | `BLENDER_PATH` | auto | Blender binary. Probed first when detecting the editor. |
 | `UNITY_PATH` | auto | Unity Editor binary. **Whitespace-split into argv.** |
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root, searched newest-version-first. |
-| `PI_BLENDER_BRIDGE_DIR` | `$XDG_CACHE_HOME/vibe-blender/bridge` | Blender request/response queue. |
-| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/vibe-unity/bridge` | Unity request/response queue. |
+| `PI_BLENDER_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-blender/bridge` | Blender request/response queue. |
+| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Unity request/response queue. |
 | `PI_UNITY_BLENDER_STAGING_DIR` | `$XDG_CACHE_HOME/unity-blender/staging` | Transfer staging. **Keep this in the cache** — the Blender flatpak sandbox cannot read `/tmp`. |
 | `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS` | `10000` | How old a bridge heartbeat may be before the bridge counts as dead. |
 
@@ -199,13 +199,13 @@ things hold that together, and none of them is the manager behaving itself:
    would leave a subagent spawned early in the session free to mint its own id,
    and therefore its own window.
 2. **The launch is claimed across processes.**
-   `pi-vibe-blender/launch.ts` `tryClaimLaunch()` creates `<bridgeDir>/launch.claim`
+   `pi-blender/launch.ts` `tryClaimLaunch()` creates `<bridgeDir>/launch.claim`
    with `wx` — the create *is* the lock. `bridgeLaunchStarted` is per-process
    module state and starts `false` in every child, so without that claim a
    manager and its three workers would each launch a window on their first
    `blender_*` call.
 3. **The binder publishes too.** Before this, the binder only *read* the id, so
-   a process that loaded it before pi-vibe-blender resolved the bridge ROOT
+   a process that loaded it before pi-blender resolved the bridge ROOT
    instead of the instance dir and reported the bridge dead while Blender was up
    one level down. Load order alone could cause it.
 

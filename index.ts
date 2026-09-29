@@ -1,7 +1,7 @@
 /**
  * pi-unity-blender -- the binder extension.
  *
- * This extension deliberately does NOT import pi-vibe-unity or pi-vibe-blender.
+ * This extension deliberately does NOT import pi-unity or pi-blender.
  * The only thing the two applications have in common is the file-queue bridge
  * protocol (a request JSON appears in a directory, the application writes a
  * response JSON back). Depending on the other extensions' internals would mean
@@ -11,7 +11,7 @@
  * for both bridges.
  *
  * Installing: this extension is standalone. It does not require
- * pi-vibe-unity to be present, but the transfers it performs obviously do need
+ * pi-unity to be present, but the transfers it performs obviously do need
  * both applications to be running with their bridges loaded.
  */
 
@@ -76,7 +76,7 @@ const IMAGE_READ_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp",
  * It must not be set by a tool call. Calling `unity_blender_status` to answer a
  * one-line question is not the user asking for a build, and turning the session
  * into a delegating manager on that basis would block the user's own `write`
- * and `edit` without ever having been asked for it. The same rule pi-vibe-blender
+ * and `edit` without ever having been asked for it. The same rule pi-blender
  * follows for /blender.
  *
  * The MECHANISM — engaged flag, gate flag, and the exemption for a subagent
@@ -232,12 +232,12 @@ const unityBlenderGuidance = [
 // tool_call and before_agent_start handlers below got `unknown` events and
 // ctx, and the `ctx.ui.notify` call in /unity-blender-exit failed to typecheck
 // because the invented command context had no `ui`. The dependency is already
-// in devDependencies, and pi-vibe-blender imports it the same way.
+// in devDependencies, and pi-blender imports it the same way.
 export default function unityBlender(pi: ExtensionAPI) {
-	// The binder is opt-in, like pi-vibe-unity. Injecting transfer guidance on
+	// The binder is opt-in, like pi-unity. Injecting transfer guidance on
 	// every turn of every session is noise in a conversation that may never
 	// mention Blender or Unity, and it competes for attention with whatever the
-	// user is actually doing. Mirrors pi-vibe-unity's engaged flag.
+	// user is actually doing. Mirrors pi-unity's engaged flag.
 	managerMode.install(pi);
 	pi.registerTool({
 		name: "unity_blender_transfer",

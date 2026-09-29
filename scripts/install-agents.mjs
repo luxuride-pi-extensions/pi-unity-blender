@@ -77,12 +77,12 @@ function resolveInstalledExtensionDir(name) {
 // extensions, so a tool named in `tools:` that no listed extension registers is
 // requested and never provided. The manager is useless with only half its
 // toolset -- and "half" is easy to get wrong in a way nothing catches: naming
-// blender_scene_info in tools: while vibe-blender is absent from this list
+// blender_scene_info in tools: while pi-blender is absent from this list
 // leaves the child holding a verification tool that no extension provides.
 const extensionDirs = [
 	resolveInstalledExtensionDir("unity-blender"),
-	resolveInstalledExtensionDir("vibe-unity"),
-	resolveInstalledExtensionDir("vibe-blender"),
+	resolveInstalledExtensionDir("pi-unity"),
+	resolveInstalledExtensionDir("pi-blender"),
 ]
 	// Drop a path that does not exist, but only if at least one does -- an
 	// all-missing pair is worth warning about rather than silently trimming.

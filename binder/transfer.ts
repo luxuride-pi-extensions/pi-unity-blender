@@ -133,7 +133,7 @@ export async function checkTransferPreconditions(
 	const problems: string[] = [];
 	if (!blenderBridgeAlive) {
 		problems.push(
-			"Blender is not running with the vibe-blender bridge loaded. Open your .blend in Blender " +
+			"Blender is not running with the pi-blender bridge loaded. Open your .blend in Blender " +
 				"(or run /blender first), then retry.",
 		);
 	}

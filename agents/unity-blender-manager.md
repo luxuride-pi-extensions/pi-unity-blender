@@ -40,7 +40,7 @@ tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls
 # that no listed extension registers is requested and NEVER PROVIDED -- the child
 # is handed a `blender_scene_info` it can never call, with no error anywhere.
 # Dropping one is easy and nothing catches it: name the Unity tools while
-# vibe-blender is absent and the agent is left holding verification tools no
+# pi-blender is absent and the agent is left holding verification tools no
 # extension provides.
 #
 # The todo package is listed because this template names `todo` in `tools:`.

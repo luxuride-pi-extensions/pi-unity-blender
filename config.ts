@@ -2,7 +2,7 @@
  * Path resolution for the unity-blender binder.
  *
  * The binder is a *separate* extension on purpose: it must be installable
- * without either pi-vibe-blender or pi-vibe-unity's TypeScript internals, and
+ * without either pi-blender or pi-unity's TypeScript internals, and
  * it must keep working if either is moved or upgraded. So it resolves both
  * bridge directories from environment variables the same way those extensions
  * publish them, and talks to both queues with its own small client.
@@ -79,7 +79,7 @@ export function getManagerPrompt(): string {
 const SIDE_MANAGER_PROMPTS = [
 	{
 		label: "Blender side",
-		extension: "vibe-blender",
+		extension: "pi-blender",
 		primary: join("blender", "agents", "blender-manager.md"),
 		// The Blender side keeps its brief template and stop conditions in a
 		// second file that its own getManagerPrompt() appends. Read it here too,
@@ -87,7 +87,7 @@ const SIDE_MANAGER_PROMPTS = [
 		// brief cheap to act on.
 		extra: join("blender", "agents", "exchange.md"),
 	},
-	{ label: "Unity side", extension: "vibe-unity", primary: join("unity", "agents", "unity-manager.md"), extra: null },
+	{ label: "Unity side", extension: "pi-unity", primary: join("unity", "agents", "unity-manager.md"), extra: null },
 ] as const;
 
 /**
@@ -131,9 +131,9 @@ function expandUserPath(raw: string, cwd: string = process.cwd()): string {
 	return isAbsolute(value) ? value : resolve(cwd, value);
 }
 
-/** Matches pi-vibe-blender's ENV_BLENDER_BRIDGE_DIR. */
+/** Matches pi-blender's ENV_BLENDER_BRIDGE_DIR. */
 const ENV_BLENDER_BRIDGE_DIR = "PI_BLENDER_BRIDGE_DIR";
-/** Matches pi-vibe-blender's ENV_BLENDER_INSTANCE_ID. */
+/** Matches pi-blender's ENV_BLENDER_INSTANCE_ID. */
 const ENV_BLENDER_INSTANCE_ID = "PI_BLENDER_INSTANCE_ID";
 
 /**
@@ -161,7 +161,7 @@ const ENV_UB_ROOT_INSTANCE_ID = "PI_UB_ROOT_INSTANCE_ID";
  * The id becomes a path segment, so it is validated rather than trusted: both
  * vars are plain strings anything in the environment can set, and "../.." or an
  * absolute path would redirect the bridge dir out of the cache entirely. This
- * is deliberately the same rule pi-vibe-blender's normalizeInstanceId applies —
+ * is deliberately the same rule pi-blender's normalizeInstanceId applies —
  * the two must agree, or a value one accepts is rejected by the other and the
  * tree splits between two bridge dirs.
  */
@@ -177,14 +177,14 @@ function normalizeInstanceId(raw: string | undefined): string | null {
 export function getBlenderBridgeRootDir(): string {
 	const override = process.env[ENV_BLENDER_BRIDGE_DIR]?.trim();
 	if (override) return expandUserPath(override);
-	return expandUserPath(join(xdgCacheHome(), "vibe-blender", "bridge"));
+	return expandUserPath(join(xdgCacheHome(), "pi-blender", "bridge"));
 }
 
 /**
  * This session's Blender instance id, published at MODULE LOAD.
  *
  * The timing is the whole point, and it is the same reason
- * pi-vibe-blender/config.ts publishes at module load rather than lazily: a
+ * pi-blender/config.ts publishes at module load rather than lazily: a
  * child is spawned from whatever the parent has already done, and a parent that
  * has not touched Blender yet has not resolved anything, so publishing on first
  * use would leave a subagent spawned early in the session free to mint its own
@@ -193,7 +193,7 @@ export function getBlenderBridgeRootDir(): string {
  * child it re-publishes the value it just inherited.
  *
  * Without this, the binder RESOLVED but never PUBLISHED: a process that loaded
- * it before pi-vibe-blender read the instance dir as absent and fell back to
+ * it before pi-blender read the instance dir as absent and fell back to
  * the bridge ROOT, reporting the Blender bridge dead while Blender was up one
  * level down — the exact failure the comment on getBlenderBridgeDir describes,
  * reachable purely by load order.
@@ -204,7 +204,7 @@ process.env[ENV_BLENDER_INSTANCE_ID] = INSTANCE_ID;
 function resolveInstanceId(): string {
 	const inherited = normalizeInstanceId(process.env[ENV_BLENDER_INSTANCE_ID]);
 	if (inherited) return inherited;
-	// Dashes stripped, same as pi-vibe-blender, so the id reads cleanly in a
+	// Dashes stripped, same as pi-blender, so the id reads cleanly in a
 	// path and in the instance files it is written to.
 	return randomUUID().replace(/-/g, "").slice(0, 12);
 }
@@ -273,7 +273,7 @@ export function describeBlenderInstanceOwnership(): BlenderInstanceOwnership {
 /**
  * The bridge dir the live Blender actually polls, which is NOT the bridge ROOT.
  *
- * pi-vibe-blender gives each pi session a private dir at
+ * pi-blender gives each pi session a private dir at
  * `<root>/<instance-id>`; the Blender it launches polls that subdir, not the
  * root. Resolving the root alone looked for a heartbeat in a directory no
  * Blender ever writes to. The symptom was specific and misleading:
@@ -283,7 +283,7 @@ export function describeBlenderInstanceOwnership(): BlenderInstanceOwnership {
  * into the root and waited out the full cold-start timeout for a poller that did
  * not exist.
  *
- * pi-vibe-blender is deliberately NOT imported here (see the module header: the
+ * pi-blender is deliberately NOT imported here (see the module header: the
  * binder must survive that extension being moved, upgraded, or removed), so the
  * rule is restated here instead: an explicit override is honoured exactly as
  * given, and otherwise the instance id is appended to the root. The id is
@@ -303,10 +303,10 @@ export function getBlenderBridgeDir(): string {
 	return join(getBlenderBridgeRootDir(), instanceId);
 }
 
-/** Matches pi-vibe-unity's ENV_UNITY_BRIDGE_DIR. */
+/** Matches pi-unity's ENV_UNITY_BRIDGE_DIR. */
 export function getUnityBridgeDir(): string {
 	return expandUserPath(
-		process.env.PI_UNITY_BRIDGE_DIR?.trim() || join(xdgCacheHome(), "vibe-unity", "bridge"),
+		process.env.PI_UNITY_BRIDGE_DIR?.trim() || join(xdgCacheHome(), "pi-unity", "bridge"),
 	);
 }
 

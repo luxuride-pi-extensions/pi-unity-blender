@@ -2,7 +2,7 @@
  * A minimal client for *both* live bridges.
  *
  * The binder deliberately reimplements the file-queue protocol instead of
- * importing pi-vibe-blender / pi-vibe-unity internals:
+ * importing pi-blender / pi-unity internals:
  *   - the two bridges use different request/response shapes and different
  *     environment variables, so one shared queue client is all they have in
  *     common anyway;
@@ -250,7 +250,7 @@ async function runLocked<T>(
 	throw new Error(
 		`Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the ${options.bridge} bridge ` +
 			`(request: ${String(options.payload.type ?? "unknown")}). The request was withdrawn, but the editor may ` +
-			`still be finishing it. Check that ${options.bridge === "unity" ? "the Unity project is open and the pi bridge plugin compiled" : "Blender is open with the vibe-blender bridge script loaded"}, then retry.`,
+			`still be finishing it. Check that ${options.bridge === "unity" ? "the Unity project is open and the pi bridge plugin compiled" : "Blender is open with the pi-blender bridge script loaded"}, then retry.`,
 	);
 }
 

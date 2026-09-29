@@ -49,7 +49,7 @@ async function isRunnable(name: string): Promise<boolean> {
 	return commandExists(name);
 }
 
-/** $BLENDER_PATH, as an argv array. Mirrors pi-vibe-blender's launch parsing. */
+/** $BLENDER_PATH, as an argv array. Mirrors pi-blender's launch parsing. */
 async function blenderPathEnv(): Promise<EditorDetection | null> {
 	const raw = process.env.BLENDER_PATH?.trim();
 	if (!raw) return null;
@@ -70,7 +70,7 @@ export async function detectBlender(): Promise<EditorDetection> {
 		return { found: true, how: "macOS app bundle", detail: macApp };
 	}
 
-	// flatpak: a successful `info` is the same signal pi-vibe-blender uses to
+	// flatpak: a successful `info` is the same signal pi-blender uses to
 	// decide it can launch Blender, and avoids launching the app to find out.
 	const flatpak = await execCommand("flatpak", ["info", "--show-ref", "org.blender.Blender"], homedir(), {
 		timeout: 5_000,
