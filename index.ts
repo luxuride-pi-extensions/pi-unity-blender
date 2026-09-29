@@ -28,8 +28,7 @@ import {
 	getUnityBridgeDir,
 } from "./config.js";
 import { readBridgeLock, isBridgeAlive } from "./binder/bridge.js";
-import * as localCore from "./manager-core.local.js";
-import { loadManagerCoreOrLocal } from "./manager-core.js";
+import { loadManagerCore } from "./manager-core.js";
 import { detectBlender, detectUnity } from "./binder/editors.js";
 import {
 	checkTransferPreconditions,
@@ -49,7 +48,7 @@ import {
  * pi-manager-core is not installed, which is the normal case for anyone who
  * only wants transfers.
  */
-const core = loadManagerCoreOrLocal(localCore);
+const core = loadManagerCore();
 
 const TRANSFER_DIRECTIONS = ["blender-to-unity", "unity-to-blender"] as const;
 

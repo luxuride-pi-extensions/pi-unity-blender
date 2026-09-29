@@ -15,5 +15,5 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["index.ts", "manager-core.ts", "manager-core.local.ts", "core/**/*.ts", "binder/**/*.ts"]
+	"include": ["index.ts", "manager-core.ts", "core/**/*.ts", "binder/**/*.ts"]
 }
