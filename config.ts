@@ -11,7 +11,7 @@
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadManagerCore } from "./manager-core.js";
@@ -113,23 +113,16 @@ const SIDE_MANAGER_PROMPTS = [
  */
 
 /**
- * Where pi keeps its agent directory, which is where the side extensions live.
+ * Path resolution comes from the shared core rather than a local copy.
  *
- * Overridable for the same reason the install script takes PI_AGENT_DIR: a test
- * harness and a non-default pi home both need to point somewhere else, and a
- * hardcoded ~/.pi would resolve to a real installation and read the wrong
- * extension's prompt.
+ * These two were defined here AND exported by the core this file already loads
+ * (for composeManagerPrompt, a few lines above), so which definition a caller
+ * used was decided by import order rather than by intent. The core's is the one
+ * pi-manager-core tests. The PI_AGENT_DIR note below is the core's, kept
+ * because it explains why these two are not literals.
  */
-function xdgCacheHome(): string {
-	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
-}
-
-function expandUserPath(raw: string, cwd: string = process.cwd()): string {
-	const value = raw.trim();
-	if (value === "~") return homedir();
-	if (value.startsWith("~/")) return homedir() + value.slice(1);
-	return isAbsolute(value) ? value : resolve(cwd, value);
-}
+const xdgCacheHome = core.xdgCacheHome;
+const expandUserPath = (raw: string, cwd: string = process.cwd()): string => core.expandUserPath(raw, cwd);
 
 /** Matches pi-blender's ENV_BLENDER_BRIDGE_DIR. */
 const ENV_BLENDER_BRIDGE_DIR = "PI_BLENDER_BRIDGE_DIR";
