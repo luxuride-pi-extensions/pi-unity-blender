@@ -47,7 +47,7 @@ tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls
 # A foreground child does not load ambient parent extensions, so a tool named
 # here that no listed extension registers is requested and NEVER PROVIDED. `todo`
 # is what keeps a long build's plan from drifting across a two-application task.
-extensions: __PI_AGENT_EXTENSION_DIR__, __PI_VIBE_UNITY_DIR__, __PI_VIBE_BLENDER_DIR__, __PI_TODO_ENTRY__
+extensions: __PI_AGENT_EXTENSION_DIR__, __PI_PI_UNITY_EXT_DIR__, __PI_BLENDER_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
 # The flat union of both sides' agent families. `unity-manager` and
 # `blender-manager` are deliberately absent: they are sibling TOP-LEVEL agents,
