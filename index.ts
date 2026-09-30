@@ -134,9 +134,13 @@ const managerMode = core.createManagerMode({
 	// which is what pi actually hands this session — see test/allowlists.mjs,
 	// which fails if the two drift.
 	allowedTools: [
-		// Delegation and supervision.
+		// Delegation, supervision, and the two halves of waiting: bg_wait
+		// blocks on this session's own async runs, subagent_supervisor answers
+		// a child that needs a decision. Both belong to pi-subagents.
 		"subagent",
 		"subagents_enable",
+		"bg_wait",
+		"subagent_supervisor",
 		"contact_supervisor",
 		// Planning and reading agent definitions to write a brief with.
 		"todo",

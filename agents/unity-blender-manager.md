@@ -28,7 +28,7 @@
 # This file is not installed as a child, so recording it there would claim a
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list.
-tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_blender_status, unity_blender_transfer, unity_source_models, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_module_revert, unity_log_critique, blender_workspace_init, blender_scene_info, blender_add_reference, blender_session_context, blender_bridge_status, blender_module_revert, blender_log_critique
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_blender_status, unity_blender_transfer, unity_source_models, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_module_revert, unity_log_critique, blender_workspace_init, blender_scene_info, blender_add_reference, blender_session_context, blender_bridge_status, blender_module_revert, blender_log_critique
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at
@@ -313,6 +313,35 @@ camera framings — not decoration.
 Then act on what came back. Do not re-ask the same question after a transfer
 or a critic failed: that is a retry, and `unity_source_models { mode: "find" }`
 or a critic's numbers are what to spend instead.
+
+## Waiting for a child, and answering one
+
+Two tools, and the mistake is treating them as one.
+
+`bg_wait` blocks this turn until a background run finishes. An ordinary async
+`subagent` run already reports back on its own, and this session is woken when
+it does — so **do not call `bg_wait` merely to wait for one.** Reach for it
+only when the answer is needed *in this turn*, which here is more often than
+in a single-application build: a transfer's two sides each take a cold Editor
+or Blender start, and the next step (merge, verify, report) is not a decision
+you can make without knowing which side actually landed. `{all: true}` waits
+for every run going; `{id: "..."}` for one.
+
+Never busy-poll, and never poll one side while the other is mid-transfer. The
+bridge is a single mutable session behind a cross-process lock; a second
+transfer started while the first is in flight queues and then fails on its own
+timeout, and `unity_blender_status` is the one call that tells you which side
+is mid-operation.
+
+`subagent_supervisor` is the other direction: a child that needs a decision
+asks upward, and only this session can answer. Call it with `action: "pending"`
+when a child reports it is stuck, and reply with `action: "reply"` carrying the
+`replyTo` and the answer. If `pending` is empty, the request may be owned by an
+external intercom tool — check there before assuming the child lied.
+
+Answer with a decision, not a reassurance. "Travel Blender to Unity as FBX
+into `Assets/Art/Vehicles`" is answerable; "be careful" restates the brief the
+child already has.
 
 ## Track the plan in `todo`, and it is not optional
 
