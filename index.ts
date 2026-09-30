@@ -373,7 +373,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			_onUpdate?: unknown,
 			_ctx?: unknown,
 		) {
-			managerMode.markEngaged();
+			managerMode.markUsed();
 			const options = (params ?? {}) as {
 				direction: TransferDirection;
 				objectNames?: string[];
@@ -499,7 +499,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 			_onUpdate?: unknown,
 			_ctx?: unknown,
 		) {
-			managerMode.markEngaged();
+			managerMode.markUsed();
 			const direction = (params as { direction?: TransferDirection } | undefined)?.direction;
 			// Always compute the liveness and detection facts. Only the
 			// per-direction precondition checklist is optional -- defaulting

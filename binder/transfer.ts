@@ -266,7 +266,13 @@ export async function transferBlenderToUnity(
 	}
 
 	const staging = createStagingDir("blender-to-unity", getStagingDir());
-	const fbxPath = join(staging, "transfer.fbx");
+	// The staged FBX is named after the MODEL, not after the transfer. A fixed
+	// "transfer.fbx" made every unnamed transfer default to the same asset names
+	// on the Unity side, so the second one silently replaced the first model's
+	// FBX and prefab. The name the caller asked for is also the only name that
+	// keeps two transfers of different models distinct in Assets/.
+	const modelName = options.name?.trim() || defaultModelName(objectNames);
+	const fbxPath = join(staging, `${modelName}.fbx`);
 	const textureDir = join(staging, "textures");
 	const scriptPath = renderBinderScript(
 		"export_fbx",
@@ -327,7 +333,7 @@ export async function transferBlenderToUnity(
 			type: "import-fbx",
 			fbxPath,
 			destination,
-			name: options.name ?? "",
+			name: modelName,
 		},
 		timeoutMs: 300_000,
 		label: "binder:import-fbx",
@@ -364,6 +370,25 @@ interface ExportSummary {
 	vertexTotal: number;
 }
 
+/**
+ * The asset name a transfer falls back to when the caller named nothing.
+ *
+ * Unity names a prefab after the file it came from, so the fallback has to
+ * differ per transfer or every unnamed transfer lands on the same prefab path.
+ * The FIRST exported object is the model's name by convention, and collapsing a
+ * multi-object export to it matches what a hand-authored FBX would be called.
+ */
+function defaultModelName(objectNames: string[]): string {
+	const raw = objectNames[0]?.trim() ?? "";
+	const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+	return cleaned.length > 0 ? cleaned : "model";
+}
+
+/**
+ * The export script prints one JSON object as its final stdout line. Blender may
+ * interleave exporter chatter, so scan backwards for the last line that parses
+ * as our summary rather than assuming the output is only that.
+ */
 /**
  * The export script prints one JSON object as its final stdout line. Blender may
  * interleave exporter chatter, so scan backwards for the last line that parses

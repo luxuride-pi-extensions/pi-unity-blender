@@ -71,9 +71,29 @@ Names must be unambiguous. Two avatars in a scene (Chiffon and Chiffon Quest
 Friendly) means a bare `Head` is an error, not a coin flip. Use a full path or
 an avatar-scoped path.
 
-The receiving prefab is **not** added to the scene unless asked. Import creates
-the prefab; instantiate it as a separate deliberate step, so a transfer never
-silently changes what the user is looking at.
+## Arriving on the Unity side
+
+The transfer ends at a **prefab asset** under `destination`, deliberately NOT in
+the scene, so importing never changes what the user is looking at. Composition is
+the next, explicit step:
+
+- `unity_prefab_info { prefabPath }` — what the prefab contains: children,
+  materials, bounds. Read-only; instantiates nothing. Do this before placing, so
+  a wrong asset is discovered before it is in the scene.
+- `unity_instantiate_prefab { prefabPath, position, rotation, parent }` — place
+  it in one call. Returns the instance's scene **path** and its child inventory.
+
+Use the returned `path` for anything afterwards. A prefab's children repeat their
+names in every instance, so `gameObject: "Leg"` is refused as ambiguous the
+moment the asset is placed twice — a scene path (`"Chair (2)/Leg"`) always
+resolves. Do not place with `Object.Instantiate` in a snippet: it produces a
+detached copy that never follows the asset.
+
+Pass `name` on every transfer. The name is what the FBX, the prefab and every
+later reference are built from, and a second transfer reusing an existing name is
+now refused instead of overwriting the first model — which is correct, but reads
+as a failure if you did not expect it. Distinct `destination` per model works
+too.
 
 ## On the Blender side
 
@@ -159,9 +179,14 @@ Verify on the receiving side, not from the report:
   ARMATURE objects' bone counts — that is the only evidence the skeleton came
   across, and a source-model handoff that silently lost the rig reports
   success.
-- Unity: `unity_scene_info` for the prefab's contents, and `unity_render` or
+- Unity: `unity_prefab_info` for the prefab's contents, and `unity_render` or
   `unity_capture_view` for how it actually looks. A material that lost its
-  shader shows up here, not in the transfer result.
+  shader shows up here, not in the transfer result. Note that
+  `unity_scene_info { categories: ["materials"] }` lists standalone `.mat` files
+  only and CANNOT see a material embedded in the FBX — which is where a
+  transferred model's materials live, so an empty list there is not evidence they
+  were lost. `unity_prefab_info`'s `materials`, or `embeddedMaterials`, is where
+  they are.
 
 Then clean up. The Blender-side collection is real scene content; leaving a
 `Pi_Imported` collection full of stale duplicates makes the next transfer's

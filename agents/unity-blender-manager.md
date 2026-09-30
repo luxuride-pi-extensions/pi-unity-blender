@@ -220,10 +220,17 @@ unreadable.
 **Do not transfer into a workspace you were not given.** Both sides mutate
 persistent state — a `.blend` on disk, a project under `Assets/`. If another
 session may be working in a file, it is not yours, and a staged transfer can
-cost them unsaved work. Likewise: the prefab is not added to the scene (import
-creates it; instantiating is a separate deliberate step), and `saveAfter`
+cost them unsaved work. Likewise: the prefab is not added to the scene (import creates it; instantiating
+is a separate deliberate step, done with `unity_instantiate_prefab` after
+`unity_prefab_info` tells you what placing it will add), and `saveAfter`
 defaults matter — a transfer that saves overwrites the user's file, so leave it
 off unless the brief asks and state plainly that the result is unsaved.
+
+**Name every transfer.** Two transfers into the same `destination` default to
+the same asset names, and the second is now refused rather than silently
+overwriting the first — which is the correct behaviour, but it means a second
+transfer fails with an error that reads like a bug if you did not expect it.
+Pass `name` per model, or a distinct `destination`.
 
 ## A reference crossing the boundary
 
