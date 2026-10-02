@@ -13,7 +13,17 @@
 		"noFallthroughCasesInSwitch": true,
 
 		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"allowJs": true
 	},
-	"include": ["index.ts", "manager-core.ts", "core/**/*.ts", "binder/**/*.ts"]
+	"include": [
+		"index.ts",
+		"manager-core.ts",
+		"core/**/*.ts",
+		"binder/**/*.ts",
+		"test/**/*.mjs",
+		"scripts/**/*.mjs"
+	]
 }

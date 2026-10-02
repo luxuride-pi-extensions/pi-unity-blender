@@ -174,6 +174,35 @@ headless or CLI use. Detection never launches anything.
 `npx tsc` downloads a decoy `tsc@2.0.4` and reports success without checking
 anything. Always use the local binary from `node_modules`.
 
+The tsconfig covers `test/` and `scripts/` as well as the extension itself, and
+turns on `noUnusedLocals` / `noUnusedParameters`. Both were decided by what went
+wrong: `config.ts` shipped an unused import that only the strict flags report,
+and the suites are executable Node that would otherwise break silently on a
+renamed export. `checkJs` is deliberately off — the `.mjs` test files are plain
+scripts whose types come from the modules they import.
+
+The two gates that guard this repo from the outside live in **pi-manager-core**,
+not here, and both read the working tree: `test/allowlists.mjs` and
+`test/agent-rosters.mjs` load the extension, so the `agentRoster` Set and the
+prompt's `allowedAgents:` line are compared against each other, and
+`test/doc-consistency.mjs` checks the README. Run them from that repo.
+
+```bash
+npm test              # everything, including the Blender-backed suite (~60s)
+npm run test:unit     # the fast suites only: no Blender process is launched
+npm run test:scripts  # just the three Python scripts
+```
+
+`test/binder-scripts.test.mjs` runs the real `binder/scripts/*.py` in a headless
+Blender, because every claim those scripts make is about how a Blender operator
+reacts to a keyword set on a given build — a mock would encode the answer and
+pass whatever the script did. It skips with the paths it searched when no
+Blender is found, so a green run is never mistaken for a passing one. Two
+details it exists to hold: scratch files go under `~/.cache`, never `tmpdir`,
+because a flatpak Blender cannot see the host's `/tmp`; and a fixture scene and
+the export run in the **same** Blender process, because the export operates on
+the scene that is open and a separate process would export an empty one.
+
 Host paths are resolved rather than hardcoded, so this repo works on another
 machine. Every variable the code reads, in the order it matters:
 

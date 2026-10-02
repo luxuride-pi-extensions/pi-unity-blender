@@ -7,7 +7,9 @@
 	"license": "MIT",
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node test/parse-summary.mjs && node test/manager-prompt.mjs",
+		"test": "node test/parse-summary.mjs && node test/manager-prompt.mjs && node --test test/",
+		"test:scripts": "node --test test/binder-scripts.test.mjs",
+		"test:unit": "node test/parse-summary.mjs && node test/manager-prompt.mjs && node --test test/registration.test.mjs",
 		"install:agents": "node scripts/install-agents.mjs"
 	},
 	"devDependencies": {
