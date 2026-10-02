@@ -92,7 +92,7 @@ This follows from the applications, not from preference:
 
 | Direction | Format | Why |
 | --- | --- | --- |
-| Blender → Unity | **FBX** | Both apps read FBX; Blender *writes* it natively and Unity imports it well. Textures are **embedded** (`embed_textures=True`) because Unity's importer cannot resolve Blender-relative texture paths. |
+| Blender → Unity | **FBX** | Both apps read FBX; Blender *writes* it natively and Unity imports it well. Textures are **embedded** (`embed_textures=True`) because Unity's importer cannot resolve Blender-relative texture paths. Armatures are exported (`object_types` includes `ARMATURE`) so a rig crosses with its mesh — without that the exporter writes the bones nowhere and the file reimports with no rig at all. Curves, surfaces and fonts are exported as temporary **mesh copies**, so the geometry crosses while your scene keeps its curve objects. |
 | Unity → Blender | **The source model file**, falling back to OBJ + MTL | A file carries the rig, the material assignment and the animation; a re-export flattens all of that away. `preferSourceModels` is on by default, and OBJ is the fallback for objects with no file behind them — Unity has **no built-in mesh exporter at all**, so the bridge writes OBJ by hand (`ExportObj` in `PiUnityBridge.cs`). |
 
 So a single Unity → Blender call often takes **both** routes at once: every
@@ -115,7 +115,12 @@ become the property set the exchange format can carry — base colour, metallic,
 roughness, emission. Layered, procedural, or custom-node setups lose their
 structure.
 
-**Does not cross:** lights, cameras, animation rigs, physics, scripts, scenes.
+**Does not cross:** lights, cameras, physics, scripts, scenes. Animation
+*clips* travel as the rig's own f-curves on an exported armature; a scene-level
+action attached to something other than a bone does not. Blender 3.x is the one
+version where an OBJ import cannot recover Unity's GameObject names (its OBJ
+importer has no equivalent of 4.x's `use_split_groups`), so they fall back to
+the file name there.
 
 Always verify materials on the receiving side. `unity_blender_transfer` returns a
 `notes` array saying so in as many words; the counts in the result are the

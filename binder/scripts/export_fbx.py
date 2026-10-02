@@ -51,6 +51,39 @@ else:
 if not objects:
     raise RuntimeError("Nothing to export: no objects matched the transfer scope.")
 
+# A curve, surface or font object exports NOTHING under the object_types above:
+# the FBX exporter writes only the types it is told to, so a CURVE-only
+# selection produced a valid, non-empty .fbx that reimports as an empty scene
+# and a summary reporting zero vertices. A curve is not a mesh, so it needs
+# converting before the exporter will carry it.
+#
+# On a COPY, deliberately. object.convert() rewrites the object in place, which
+# would turn the user's curve into a mesh in their open .blend -- and the binder
+# saves that .blend, so a transfer would silently restructure the scene it was
+# only meant to read. The copies are removed again once the FBX is written, by
+# which point the geometry is in the file.
+converted_from: dict[str, str] = {}
+convertible = [obj for obj in objects if obj.type in {"CURVE", "SURFACE", "FONT"}]
+if convertible:
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in convertible:
+        copy = obj.copy()
+        copy.data = obj.data.copy()
+        bpy.context.scene.collection.objects.link(copy)
+        copy.select_set(True)
+        converted_from[copy.name] = obj.name
+    bpy.context.view_layer.objects.active = bpy.context.view_layer.objects[convertible[0].name]
+    bpy.ops.object.convert(target="MESH")
+    # Re-fetch by the copy's own name: `objects` still holds the ORIGINALS, and
+    # filtering that list by the copy's name yields nothing, which exports the
+    # curve's absence while the NOTE above claims it was sent.
+    converted = [bpy.data.objects[name] for name in converted_from if bpy.data.objects.get(name)]
+    objects = [obj for obj in objects if obj.type != "CURVE" and obj.type != "SURFACE" and obj.type != "FONT"] + converted
+    print(
+        f"NOTE: exported {len(convertible)} curve/surface/font object(s) as mesh copies "
+        f"({', '.join(converted_from.values())}); the originals are unchanged in the scene."
+    )
+
 # bpy.ops exporters act on the selection, not on a list argument.
 bpy.ops.object.select_all(action="DESELECT")
 for obj in objects:
@@ -72,7 +105,13 @@ _wanted = {
     "apply_scale_options": "FBX_SCALE_UNITS",
     # Unity's importer applies transforms itself; baking avoids a double scale.
     "bake_space_transform": False,
-    "object_types": {"MESH", "EMPTY"},
+    # ARMATURE is not optional. Without it the FBX exporter writes the mesh and
+    # leaves the bones behind, and the file reimports with the rig gone: a
+    # Blender -> Unity transfer of a rigged object delivered a static mesh that
+    # looked complete and the summary reported it as one. Measured both ways --
+    # exported with {MESH, EMPTY} the file reimports with no armature at all,
+    # with ARMATURE added the same rig comes back with its bones intact.
+    "object_types": {"MESH", "EMPTY", "ARMATURE"},
     "use_mesh_modifiers": True,
     "mesh_smooth_type": "FACE",
     "add_leaf_bones": False,
@@ -90,17 +129,46 @@ if _dropped:
     print(f"NOTE: this Blender's FBX exporter does not support {_dropped}; skipped.")
 bpy.ops.export_scene.fbx(**_kwargs)
 
-if not os.path.exists(out_path):
-    raise RuntimeError(f"Blender reported success but no FBX was written to {out_path}")
-
-# Report the material situation rather than pretending it round-tripped.
-materials = set()
+# The summary is assembled HERE, before the temporary copies are removed, and
+# the copy's name is reported as the OBJECT's name. Reading obj.data after the
+# removal is the trap: a StructRNA of a removed object is dead, and the script
+# dies on it with a ReferenceError that reads like a Blender bug. Reporting
+# "MyCurve.001" instead of "MyCurve" is the other half of the same mistake --
+# the copy is an implementation detail and the user asked for the curve.
+exported_names = [converted_from.get(obj.name, obj.name) for obj in objects]
+exported_materials = set()
 for obj in objects:
     if obj.type != "MESH":
         continue
     for slot in getattr(obj.data, "materials", []):
         if slot is not None:
-            materials.add(slot.name)
+            exported_materials.add(slot.name)
+# A converted curve copy carries no material slots -- the conversion drops them
+# -- so the ORIGINAL's slots are read too, or a curve's only material is
+# reported as not having crossed when it is in the FBX.
+for original_name in converted_from.values():
+    original = bpy.data.objects.get(original_name)
+    for slot in getattr(getattr(original, "data", None), "materials", []):
+        if slot is not None:
+            exported_materials.add(slot.name)
+exported_vertex_total = sum(len(obj.data.vertices) for obj in objects if obj.type == "MESH")
+
+# The temporary mesh copies have done their job: the geometry is in the FBX.
+# Removing them here rather than leaving them keeps the scene the user sees the
+# scene they had, and keeps a SECOND transfer from seeing them in its scope.
+for copy_name in converted_from:
+    temporary = bpy.data.objects.get(copy_name)
+    if temporary is not None:
+        temporary_data = temporary.data
+        bpy.data.objects.remove(temporary, do_unlink=True)
+        if temporary_data.users == 0 and isinstance(temporary_data, bpy.types.Mesh):
+            bpy.data.meshes.remove(temporary_data)
+
+if not os.path.exists(out_path):
+    raise RuntimeError(f"Blender reported success but no FBX was written to {out_path}")
+
+# Report the material situation rather than pretending it round-tripped.
+materials = exported_materials
 
 textures = []
 if texture_dir:
@@ -122,12 +190,10 @@ print(
     json.dumps(
         {
             "fbxPath": out_path,
-            "objectNames": [obj.name for obj in objects],
+            "objectNames": exported_names,
             "materialNames": sorted(materials),
             "textureNames": textures,
-            "vertexTotal": sum(
-                len(obj.data.vertices) for obj in objects if obj.type == "MESH"
-            ),
+            "vertexTotal": exported_vertex_total,
         }
     )
 )

@@ -36,7 +36,13 @@ bpy.ops.object.select_all(action="DESELECT")
 # importer falls back to the FILE name and the imported object is called
 # "transfer" instead of the GameObject it came from. That silently breaks object
 # identity across a Unity -> Blender -> Unity round trip, which is the main
-# reason to export by name at all. Ask for group naming explicitly.
+# reason to export by name at all. use_split_groups is the keyword that asks
+# for group naming -- but it is BLENDER 4.x-ONLY, where wm.obj_import replaced
+# import_scene.obj, and the 3.x operator has no equivalent and no such keyword.
+# Asking for it unconditionally is a hard "keyword unrecognized" TypeError on
+# 3.x, so it is filtered against the live RNA below like every other keyword,
+# and on 3.x the importer's own defaults apply and object names fall back to the
+# file name.
 #
 # Keyword names have moved between Blender versions, so filter against the real
 # RNA instead of trusting a fixed set.
@@ -44,6 +50,7 @@ _IMPORT_KWARGS = {
     "filepath": obj_path,
     "forward_axis": "NEGATIVE_Z",
     "up_axis": "Y",
+    "use_split_groups": True,
 }
 
 
@@ -52,15 +59,12 @@ def _importer_rna():
         module = getattr(bpy.ops, module_name, None)
         operator = getattr(module, operator_name, None) if module else None
         if operator is not None:
-            return operator.get_rna_type()
-    return None
+            return operator, operator.get_rna_type()
+    return None, None
 
 
-def _supported_kwargs(desired):
+def _supported_kwargs(desired, rna):
     """Keep only the keywords this Blender's importer really accepts."""
-    rna = _importer_rna()
-    if rna is None:
-        raise RuntimeError("This Blender build exposes no OBJ importer (tried wm.obj_import and import_scene.obj).")
     supported = {prop.identifier for prop in rna.properties}
     dropped = sorted(set(desired) - supported)
     if dropped:
@@ -68,11 +72,16 @@ def _supported_kwargs(desired):
     return {key: value for key, value in desired.items() if key in supported}
 
 
-_kwargs = _supported_kwargs(_IMPORT_KWARGS)
-try:
-    bpy.ops.wm.obj_import(**_kwargs)
-except AttributeError:
-    bpy.ops.import_scene.obj(**_kwargs)
+# The operator is resolved ONCE, the same way its RNA was, and then CALLED --
+# not re-derived by catching AttributeError. A blanket except would also swallow
+# an AttributeError raised for an unrelated reason from inside a working
+# importer, and then silently re-run the other version's operator over the same
+# file, which is how one transfer ends up importing everything twice.
+_operator, _rna = _importer_rna()
+if _operator is None or _rna is None:
+    raise RuntimeError("This Blender build exposes no OBJ importer (tried wm.obj_import and import_scene.obj).")
+_kwargs = _supported_kwargs(_IMPORT_KWARGS, _rna)
+_operator(**_kwargs)
 
 imported = [obj for obj in bpy.data.objects if obj not in before]
 if not imported:
