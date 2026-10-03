@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit tests and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --legacy-peer-deps is not optional here. package.json declares
+      # peerDependencies: { "pi-manager-core": "*" }, which is the documented
+      # shape for a Pi package (docs/packages.md): it is loaded from the
+      # extensions directory, not installed from the registry. Plain `npm ci`
+      # therefore fails with 404 on a package that was never published, before a
+      # single test runs.
+      - run: npm ci --legacy-peer-deps
+      - run: npm run typecheck
+      - run: npm test
+
+  consistency:
+    name: manager-core consistency
+    runs-on: ubuntu-latest
+    steps:
+      # pi-blender is a PRIVATE repository, and this repo's manager-prompt test
+      # reads ITS manager prompt to check the two managers agree on the
+      # Blender-side contract. There is no way to do that from here without
+      # reading that repo, so this job is gated on the same PAT the other
+      # consumers use -- and skipped rather than failed when it is absent, so a
+      # fork behaves sanely instead of red for a missing credential.
+      #
+      # pi-manager-core's own CI checks all three consumers out together and
+      # runs the full cross-repo suite, including this pair. This job is the
+      # faster half of that: it needs two repos, not four.
+      if: ${{ secrets.CONSUMER_TOKEN != '' }}
+      name: pi-blender agreement
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+          with:
+            repository: luxuride-pi-extensions/pi-blender
+            ref: master
+            token: ${{ secrets.CONSUMER_TOKEN }}
+
+        - uses: actions/checkout@v4
+          with:
+            repository: luxuride-pi-extensions/pi-manager-core
+            ref: master
+            token: ${{ secrets.CONSUMER_TOKEN }}
+
+        # pi-unity's manager prompt, for the reason above: the composed prompt
+        # reads it, so without this repo the check below fails on a missing
+        # section rather than on a real disagreement.
+        - uses: actions/checkout@v4
+          with:
+            repository: luxuride-pi-extensions/pi-unity
+            ref: master
+            token: ${{ secrets.CONSUMER_TOKEN }}
+
+        - uses: actions/setup-node@v4
+          with:
+            node-version: 22
+            cache: npm
+
+        - run: npm ci --legacy-peer-deps
+
+        - name: install pi-blender
+          working-directory: pi-blender
+          run: npm ci --legacy-peer-deps
+
+        # test/manager-prompt.mjs composes its prompt from the extensions
+        # INSTALLED under PI_AGENT_DIR, not from a sibling checkout: it reads
+        # pi-unity's manager prompt as well as pi-blender's, so a CI runner has
+        # to have both. A checkout that is not installed is a silently shorter
+        # prompt, and the suite reports that as a missing section.
+        - name: install the extensions pi composes from
+          run: |
+            agent="$RUNNER_TEMP/agent-dir/extensions"
+            mkdir -p "$agent"
+            ln -s "$GITHUB_WORKSPACE/pi-blender" "$agent/pi-blender"
+            ln -s "$GITHUB_WORKSPACE/pi-unity" "$agent/pi-unity"
+
+        - name: manager prompt agreement
+          env:
+            PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+            PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+          run: node test/manager-prompt.mjs
