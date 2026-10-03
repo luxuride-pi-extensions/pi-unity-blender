@@ -10,10 +10,59 @@ permissions:
   contents: read
 
 jobs:
-  unit:
-    name: unit tests and typecheck
+  # There is no token-free job in this repository, which is a property of the
+  # suite rather than an omission.
+  #
+  # test/manager-prompt.mjs is in `npm test`, and it cannot pass without the
+  # other two extensions installed. It composes this repo's manager prompt out
+  # of pi-blender's and pi-unity's, then asserts the two halves agree on the
+  # Blender-side contract -- who briefs whom, and what a stop condition is.
+  # With the extensions absent it reports 11 passed and 4 FAILED: both side
+  # bodies missing, and a load-failure notice the run is not supposed to emit.
+  # So this job cannot be token-free without taking manager-prompt.mjs out of
+  # `npm test`, and splitting the suite so a "unit" job could report 30 passing
+  # while the agreement check sat in a skipped job would leave the contract
+  # untested on every pull request.
+  #
+  # Gated on a repository VARIABLE rather than `secrets`: `secrets` is not in
+  # scope for a job-level `if` (only github/needs/vars/inputs are), and writing
+  # `if: ${{ secrets.CONSUMER_TOKEN != '' }}` fails the whole workflow file with
+  # no jobs at all. A variable also expresses the real condition -- "this repo
+  # can read its siblings" -- which is a property of the configuration, not of
+  # whether a particular PAT happens to be populated today.
+  test:
+    name: unit tests, typecheck, and manager-prompt agreement
+    if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          # github.token cannot read a PRIVATE repository, and every repository
+          # in this org is PRIVATE. A PAT with read access to the org.
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-blender
+          ref: master
+          path: projects/pi-blender
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      # pi-unity's manager prompt is half of what this repository's is composed
+      # from, so a runner has to have it or the check below has nothing to
+      # compare against.
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-unity
+          ref: master
+          path: projects/pi-unity
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      # This repository lands in a subdirectory, so $GITHUB_WORKSPACE is itself
+      # a projects/ directory holding all four checkouts.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -21,80 +70,46 @@ jobs:
           node-version: 22
           cache: npm
 
-      # --legacy-peer-deps is not optional here. package.json declares
+      # The core's own dependency install, and not just its files: jiti is a
+      # transitive dependency of @earendil-works/pi-coding-agent, so this is
+      # the only place on a clean runner where the loader these tests need
+      # exists.
+      - name: install the manager core
+        working-directory: projects/pi-manager-core
+        run: npm ci
+
+      # --legacy-peer-deps: all three consumers declare
       # peerDependencies: { "pi-manager-core": "*" }, which is the documented
-      # shape for a Pi package (docs/packages.md): it is loaded from the
-      # extensions directory, not installed from the registry. Plain `npm ci`
-      # therefore fails with 404 on a package that was never published, before a
-      # single test runs.
-      - run: npm ci --legacy-peer-deps
-      - run: npm run typecheck
-      - run: npm test
+      # shape for a Pi package (docs/packages.md) -- loaded from the extensions
+      # directory, not installed from the registry -- so plain `npm ci` fails
+      # with 404 on a package that was never published.
+      - name: install the extensions and this repository
+        run: |
+          for repo in pi-blender pi-unity pi-unity-blender; do
+            (cd "projects/$repo" && npm ci --legacy-peer-deps)
+          done
 
-  consistency:
-    name: manager-core consistency
-    runs-on: ubuntu-latest
-    steps:
-      # pi-blender is a PRIVATE repository, and this repo's manager-prompt test
-      # reads ITS manager prompt to check the two managers agree on the
-      # Blender-side contract. There is no way to do that from here without
-      # reading that repo, so this job is gated on the same PAT the other
-      # consumers use -- and skipped rather than failed when it is absent, so a
-      # fork behaves sanely instead of red for a missing credential.
+      # test/manager-prompt.mjs reads the extensions INSTALLED under
+      # PI_AGENT_DIR, not from sibling checkouts: a checkout that is not
+      # installed is a silently shorter prompt, and the suite reports that as a
+      # missing section rather than as a load failure.
       #
-      # pi-manager-core's own CI checks all three consumers out together and
-      # runs the full cross-repo suite, including this pair. This job is the
-      # faster half of that: it needs two repos, not four.
-      if: ${{ secrets.CONSUMER_TOKEN != '' }}
-      name: pi-blender agreement
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-          with:
-            repository: luxuride-pi-extensions/pi-blender
-            ref: master
-            token: ${{ secrets.CONSUMER_TOKEN }}
+      # The names are the ones pi installs under, which are not the repo names:
+      # the binder extension is "unity-blender", and pi's own resolver probes
+      # both "manager-core" and "pi-manager-core" when a consumer looks for it.
+      - name: link the extensions into an agent dir
+        run: |
+          agent="$RUNNER_TEMP/agent-dir/extensions"
+          mkdir -p "$agent"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-unity"          "$agent/pi-unity"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"        "$agent/pi-blender"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core"   "$agent/manager-core"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender"  "$agent/unity-blender"
 
-        - uses: actions/checkout@v4
-          with:
-            repository: luxuride-pi-extensions/pi-manager-core
-            ref: master
-            token: ${{ secrets.CONSUMER_TOKEN }}
-
-        # pi-unity's manager prompt, for the reason above: the composed prompt
-        # reads it, so without this repo the check below fails on a missing
-        # section rather than on a real disagreement.
-        - uses: actions/checkout@v4
-          with:
-            repository: luxuride-pi-extensions/pi-unity
-            ref: master
-            token: ${{ secrets.CONSUMER_TOKEN }}
-
-        - uses: actions/setup-node@v4
-          with:
-            node-version: 22
-            cache: npm
-
-        - run: npm ci --legacy-peer-deps
-
-        - name: install pi-blender
-          working-directory: pi-blender
-          run: npm ci --legacy-peer-deps
-
-        # test/manager-prompt.mjs composes its prompt from the extensions
-        # INSTALLED under PI_AGENT_DIR, not from a sibling checkout: it reads
-        # pi-unity's manager prompt as well as pi-blender's, so a CI runner has
-        # to have both. A checkout that is not installed is a silently shorter
-        # prompt, and the suite reports that as a missing section.
-        - name: install the extensions pi composes from
-          run: |
-            agent="$RUNNER_TEMP/agent-dir/extensions"
-            mkdir -p "$agent"
-            ln -s "$GITHUB_WORKSPACE/pi-blender" "$agent/pi-blender"
-            ln -s "$GITHUB_WORKSPACE/pi-unity" "$agent/pi-unity"
-
-        - name: manager prompt agreement
-          env:
-            PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
-            PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
-          run: node test/manager-prompt.mjs
+      - name: typecheck and test
+        env:
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        run: |
+          npm run typecheck
+          npm test
