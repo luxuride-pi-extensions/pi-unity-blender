@@ -28,7 +28,7 @@
 # This file is not installed as a child, so recording it there would claim a
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_blender_status, unity_blender_transfer, unity_source_models, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_module_revert, unity_log_critique, blender_workspace_init, blender_scene_info, blender_add_reference, blender_session_context, blender_bridge_status, blender_module_revert, blender_log_critique
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_blender_status, unity_blender_transfer, unity_source_models, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_module_revert, unity_log_critique, unity_compose_prefab, blender_workspace_init, blender_scene_info, blender_add_reference, blender_session_context, blender_bridge_status, blender_module_revert, blender_log_critique
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at
@@ -231,6 +231,32 @@ the same asset names, and the second is now refused rather than silently
 overwriting the first — which is the correct behaviour, but it means a second
 transfer fails with an error that reads like a bug if you did not expect it.
 Pass `name` per model, or a distinct `destination`.
+
+**One transfer, one model.** A prefab is a single object or a part of the world.
+A transfer creates the first: one *placeable unit* — not one mesh. A tree is one
+object even though it exports as stem, branches and leaves; that is what you
+place. What is not one object is several *independent* items sent together: they
+arrive as one FBX and one prefab holding things nobody can place separately, and
+editing one of them means editing the file all of them came from. **Furniture is
+never bundled as furniture** — a category is not a unit, and a name like
+`Furniture` hides exactly this failure. Brief the worker for one model per
+transfer, each with its own `name` and `destination`.
+
+**Things that belong together become a part of the world, built from prefabs.** A
+furnished room, a house with its furniture, an island, an avatar with an outfit —
+that is the second kind of prefab, and it is built with `unity_compose_prefab` as
+nested instances. Reuse is **recursive with no depth limit**: an island can hold a
+house that holds furniture, every level a nested prefab, so a leaf model edit
+propagates all the way up. Never let a worker merge a composite's meshes — it looks
+the same and stops following its models. If the layout was decided in Blender
+(pi-blender's room pipeline is the right place for pacing and dressing), the Unity
+side still assembles it from prefabs; the Blender work tells you which prefab goes
+where.
+
+**A transferred model in a VRChat project is not done until its materials are
+PC/Quest.** PC and Android need different materials — EasyQuestSwitch, two
+variants, or one prefab with an entry. If the project has no EasyQuestSwitch,
+then PC only, and say so in the report rather than implying Quest support.
 
 ## A reference crossing the boundary
 

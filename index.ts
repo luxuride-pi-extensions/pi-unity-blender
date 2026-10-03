@@ -142,6 +142,21 @@ const managerMode = core.createManagerMode({
 		"bg_wait",
 		"subagent_supervisor",
 		"contact_supervisor",
+		// Context management, from the ambient billion-context plugin. A
+		// manager is the one role whose transcript grows without bound, and a
+		// transfer session is the longest of all: it reads both applications'
+		// state for every module. It is also the only role that can afford to
+		// lose detail, because everything it still needs is in `todo`.
+		//
+		// Named explicitly because the gate is deny-by-default. pi itself ships
+		// no compression tool, so listing one the session does not have is
+		// harmless; omitting one that IS present is how a 100k session re-reads
+		// a build it already summarized.
+		"compress",
+		"decompress",
+		"search_context",
+		"acp_status",
+		"acp_cache",
 		// Planning and reading agent definitions to write a brief with.
 		"todo",
 		"read",
@@ -166,6 +181,13 @@ const managerMode = core.createManagerMode({
 		"unity_world",
 		"unity_module_revert",
 		"unity_log_critique",
+		// A transfer session composes a composite prefab on the Unity side, and
+		// the manager prompt says so. Leaving it out of this list does not just
+		// narrow the session: the gate is deny-by-default, so the manager reads a
+		// brief telling it to compose a composite and is refused the one call
+		// that does it. Keep the two in step.
+		"unity_prefab_info",
+		"unity_compose_prefab",
 		"blender_workspace_init",
 		"blender_scene_info",
 		"blender_add_reference",
