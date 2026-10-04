@@ -145,11 +145,19 @@ The consequences are per-object, and that is what the aggregate hides:
   `blender_scene_info` and others do not.
 - An FBX import needs no axis fix: FBX is Y-up like Unity, so Blender's
   importer lines the two up on its own and the transfer says it was imported
-  "at its authored orientation". An OBJ import is given a **negative Y scale**
-  instead. That asymmetry matters on a round trip: send the OBJ'd object back
-  and the importer restores the handedness, so it is restored once, not
-  doubled. If an object comes back mirrored or lying on its side, this
-  asymmetry is the first thing to check, not the exporter.
+  "at its authored orientation". An OBJ import is mirrored on the Y axis, and
+  that mirror is **baked into the mesh data** — vertices, vertex normals and
+  face winding all reversed, object scale left at 1. A live negative object
+  scale would have been wrong: Blender does not carry custom normals or face
+  winding through a mirroring transform, so the object would sit correctly and
+  shade inside-out, and a transfer that reported success. Baking also makes the
+  flip idempotent, because there is no scale left to multiply by −1 a second
+  time on a re-import. `flippedRoots` names the objects that were mirrored; an
+  empty list on an OBJ transfer means the flip did not happen, so check it
+  before trusting the result. On a round trip, send the OBJ'd object back and
+  the mirrored geometry is exported as authored — the handedness is restored
+  once, not doubled. If an object comes back mirrored or lying on its side,
+  this asymmetry is the first thing to check, not the exporter.
 
 Ambiguity is reported rather than resolved. A GameObject name shared by several
 objects cannot be exported by name — the OBJ exporter takes one object per name

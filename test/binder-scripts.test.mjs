@@ -286,6 +286,164 @@ describe("binder scripts", NEEDS_BLENDER, () => {
 				/does-not-exist\.obj/,
 			);
 		});
+
+		// ---------------------------------------------------------------------
+		// The flip has to be BAKED, not left as a live negative scale.
+		//
+		// Measured on Blender 5.2, a tetra under the old `scale.y *= -1` ends up
+		// with determinant -1 and, on EVERY face, a stored vertex normal that
+		// disagrees with the face's own winding by exactly -1.0 dot product.
+		// Blender DOES reverse winding under a mirror but does NOT reverse the
+		// stored normals, so the object shades inside-out and every count in the
+		// summary still looks right. After baking (mesh.transform + flip_normals)
+		// the same object is at determinant 1 with every face agreeing at +1.0.
+		//
+		// So the assertions here are on normals-versus-winding, which is what
+		// actually differs between the two implementations, plus the object
+		// transform, which must not be left mirroring.
+		// ---------------------------------------------------------------------
+
+		/** Asymmetric, so a mirror moves it and a symmetry hides the defect. */
+		const OBJ_TETRA =
+			"g Tet\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n";
+
+/**
+ * Report the named mesh the way the finding is measured, as one JSON line.
+ *
+ * Deliberately does NOT run CLEAR: this runs in the SAME process as the import
+ * it measures, so a cleanup fixture would delete the very object under test
+ * (measured -- it produced `KeyError: 'Tet'`).
+ */
+function measureFlipFixture(name) {
+	return fixture(
+		`measure-flip-${name}`,
+		`import bpy, json as _json
+from mathutils import Vector
+obj = bpy.data.objects[${JSON.stringify(name)}]
+m3 = obj.matrix_world.to_3x3()
+co = [m3 @ v.co for v in obj.data.vertices]
+centre = sum(co, Vector()) / len(co)
+agree, outward = [], []
+for poly in obj.data.polygons:
+    stored = (m3 @ poly.normal).normalized()
+    vs = [co[i] for i in poly.vertices]
+    winding = (vs[1] - vs[0]).cross(vs[2] - vs[0]).normalized()
+    face_centre = sum(vs, Vector()) / len(vs)
+    agree.append(round(sum(a * b for a, b in zip(stored, winding)), 3))
+    outward.append(round(sum(a * b for a, b in zip(stored, (face_centre - centre).normalized())), 3))
+print("FLIP=" + _json.dumps({"name": obj.name, "scale": list(obj.scale), "determinant": obj.matrix_world.determinant(), "agree": agree, "outward": outward}))
+`,
+	);
+}
+
+/** The FLIP= line, or a failure naming what was printed instead. */
+function readFlip(stdout) {
+	const line = stdout.split("\n").find((l) => l.startsWith("FLIP="));
+	assert.ok(line, `no FLIP line:\n${stdout.slice(-2000)}`);
+	return JSON.parse(line.slice("FLIP=".length));
+}
+
+/**
+ * Assert the mesh carries no mirroring transform and is shaded OUTSIDE.
+ *
+ * Two independent metrics, because they catch different broken implementations
+ * and a test with only one of them passes the other's bug. Measured on Blender
+ * 5.2 with the tetra below:
+ *
+ *   implementation                     scale      det  agree  outward
+ *   scale.y *= -1 (the old code)        [1,-1,1]   -1   -1.0    +0.9
+ *   transform() only, no flip_normals   [1,1,1]    +1   +1.0    -0.9
+ *   transform() + flip_normals          [1,1,1]    +1   +1.0    +0.9
+ *
+ * `agree` (stored normal vs the face's own winding) is -1 under the old code,
+ * because Blender reverses winding under a mirror but not the stored normals.
+ * `outward` (stored normal vs the direction away from the mesh centroid) is -1
+ * under a half-fix that mirrors positions without flipping normals, which
+ * `agree` cannot see -- mirroring positions alone leaves the two in agreement
+ * with each other, pointing the wrong way.
+ *
+ * So a correct mesh needs det 1, no negative scale, agree all +1 AND outward
+ * all +1, and any single one of those four would have passed a weaker test.
+ */
+function assertCorrectlyShaded(measured, because) {
+	assert.deepEqual(measured.scale, [1, 1, 1], `${because}: the mirror was left as a live object scale`);
+	assert.equal(measured.determinant, 1, `${because}: the object matrix still mirrors, so normals cannot be trusted`);
+	assert.ok(measured.agree.length > 0, `${because}: no faces were measured`);
+	for (const [index, dot] of measured.agree.entries()) {
+		// -1 is the exact signature of an un-flipped stored normal under a
+		// mirror: the winding was reversed, the normal was not.
+		assert.equal(
+			dot,
+			1,
+			`${because}: face ${index}'s stored normal disagrees with its winding (dot ${dot}) -- inside-out shading`,
+		);
+	}
+	for (const [index, dot] of measured.outward.entries()) {
+		assert.ok(
+			dot > 0,
+			`${because}: face ${index}'s stored normal points INTO the mesh (dot ${dot}) -- the geometry is inside-out`,
+		);
+	}
+}
+
+/** Render an OBJ import of the tetra with the given flipUpAxis. */
+		function renderTetra(flipUpAxis) {
+			const objPath = join(work, "tetra.obj");
+			writeFileSync(objPath, OBJ_TETRA);
+			return render("import_obj", {
+				objPath,
+				mtlPath: null,
+				objectNames: ["Tet"],
+				collectionName: "Pi_Flip",
+				flipUpAxis,
+			});
+		}
+
+		test("flipUpAxis bakes the mirror into the mesh, normals and winding together", NEEDS_BLENDER, () => {
+			const { stdout, stderr } = runInBlender([renderTetra(true), measureFlipFixture("Tet")]);
+			assert.ok(stdout.includes("FLIP="), `the measurement fixture did not run:\n${stderr.slice(-2000)}`);
+			assertCorrectlyShaded(readFlip(stdout), "after an OBJ import with flipUpAxis");
+		});
+
+		test("flipUpAxis: false leaves the geometry as authored", NEEDS_BLENDER, () => {
+			// The control for the test above. If this also came out at -1, the
+			// measurement would be measuring something other than the flip.
+			const { stdout, stderr } = runInBlender([renderTetra(false), measureFlipFixture("Tet")]);
+			assert.ok(stdout.includes("FLIP="), `the measurement fixture did not run:\n${stderr.slice(-2000)}`);
+			assertCorrectlyShaded(readFlip(stdout), "after an OBJ import without a flip");
+		});
+
+		test("the flip is reported as flippedRoots, and only when it happened", NEEDS_BLENDER, () => {
+			const on = summary(runInBlender(renderTetra(true)).stdout);
+			assert.deepEqual(on.flippedRoots, ["Tet"], "the flipped mesh was not reported");
+
+			const off = summary(runInBlender(renderTetra(false)).stdout);
+			assert.deepEqual(off.flippedRoots, [], "flipUpAxis: false still reported a flip");
+		});
+
+		test("a round trip through FBX restores the handedness exactly once", NEEDS_BLENDER, () => {
+			// The claim in SKILL.md and in the transfer's own note: send it back
+			// and the handedness comes back once, not doubled. Unity -> Blender
+			// (OBJ, flipped) -> Unity (FBX, unflipped) is exactly that path, and
+			// a doubled or uncancelled flip arrives as a negative determinant or
+			// as faces whose normals disagree with their winding.
+			//
+			// The reimported object lands as "Tet.001" because the OBJ import
+			// already owns the name, so the measurement names it explicitly
+			// rather than reaching for "Tet" and measuring the pre-export mesh.
+			const { stdout, stderr } = runInBlender([
+				renderTetra(true),
+				render("export_fbx", { outPath: join(work, "roundtrip.fbx"), textureDir: null, objectNames: ["Tet"] }),
+				render("import_fbx", {
+					fbxPaths: [join(work, "roundtrip.fbx")],
+					collectionName: "Pi_Flip",
+					flipUpAxis: false,
+				}),
+				measureFlipFixture("Tet.001"),
+			]);
+			assert.ok(stdout.includes("FLIP="), `the measurement fixture did not run:\n${stderr.slice(-2000)}`);
+			assertCorrectlyShaded(readFlip(stdout), "after the FBX round trip");
+		});
 	});
 
 	describe("export_fbx", NEEDS_BLENDER, () => {

@@ -505,6 +505,8 @@ export interface UnityToBlenderResult {
 	importedFiles?: string[];
 	/** Armatures that came in with the model, when that path was used. */
 	armatures?: string[];
+	/** Objects whose Y axis was mirrored on import, by whichever route flipped. */
+	flippedRoots?: string[];
 	/** Materials Blender actually created. */
 	materialNames: string[];
 	collectionName: string;
@@ -685,6 +687,7 @@ export async function transferUnityToBlender(
 	const materialNames: string[] = [];
 	const importedFiles: string[] = [];
 	const armatures: string[] = [];
+	const flippedRoots: string[] = [];
 	let collectionUsed = collectionName;
 	let vertexTotal = 0;
 	const blenderOutput: string[] = [];
@@ -732,6 +735,7 @@ export async function transferUnityToBlender(
 		materialNames.push(...summary.materialNames);
 		importedFiles.push(...(summary.importedFiles ?? []));
 		armatures.push(...(summary.armatures ?? []));
+		flippedRoots.push(...(summary.flippedRoots ?? []));
 		collectionUsed = summary.collectionName;
 		vertexTotal += summary.vertexTotal;
 	}
@@ -745,6 +749,7 @@ export async function transferUnityToBlender(
 		vertexTotal,
 		importedFiles,
 		armatures,
+		flippedRoots,
 	};
 
 	const useSourceModels = stagedPaths.length > 0;
@@ -808,12 +813,16 @@ export async function transferUnityToBlender(
 	if (useSourceModels) {
 		notes.push(
 			"Imported at its authored orientation. FBX is Y-up like Unity, so the importer lines the two up " +
-				"without the negative Y scale the OBJ path needs.",
+				"without the axis flip the OBJ path needs.",
 		);
 	} else if (options.flipUpAxis ?? true) {
 		notes.push(
-			"Imported with a negative Y scale so the objects sit sensibly in Blender's Z-up space. If you " +
-				"export this back to Unity, expect the handedness to be restored by the importer, not doubled.",
+			"Imported with the Y axis mirrored, BAKED INTO THE MESH rather than left as a negative object " +
+				"scale: a live negative scale does not carry the vertex normals or the face winding through " +
+				"the mirror, so the objects would sit correctly but shade inside-out. Nothing is left to " +
+				"compound -- exporting this back to Unity writes the mirrored geometry as authored, so the " +
+				"handedness comes back once, not doubled, and re-importing the same names flips each fresh " +
+				`import exactly once. Flipped: ${imported.flippedRoots.join(", ") || "(none)"}.`,
 		);
 	}
 	if (!(options.saveAfter ?? true)) {
@@ -838,6 +847,7 @@ export async function transferUnityToBlender(
 		importedNames: imported.importedNames,
 		importedFiles: imported.importedFiles,
 		armatures: imported.armatures,
+		flippedRoots: imported.flippedRoots,
 		materialNames: imported.materialNames,
 		collectionName: imported.collectionName,
 		vertexTotal: imported.vertexTotal,
