@@ -103,7 +103,13 @@ jobs:
       # with 404 on a package that was never published.
       - name: install the extensions and this repository
         run: |
-          for repo in pi-blender pi-unity pi-unity-blender; do
+          # NOT pi-unity-blender: this repository's own checkout IS
+          # projects/pi-unity-blender. Naming it here as well made the loop
+          # `cd projects/pi-unity-blender` in a shell whose working directory
+          # was the workspace root, and the runner reported
+          # `cd: projects/pi-unity-blender: No such file or directory` -- the
+          # path is relative, so it only resolves from the root.
+          for repo in pi-blender pi-unity; do
             (cd "projects/$repo" && npm ci --legacy-peer-deps)
           done
 
