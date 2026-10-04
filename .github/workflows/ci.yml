@@ -35,7 +35,7 @@ jobs:
     if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-manager-core
           ref: master
@@ -44,7 +44,7 @@ jobs:
           # in this org is PRIVATE. A PAT with read access to the org.
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-blender
           ref: master
@@ -54,7 +54,7 @@ jobs:
       # pi-unity's manager prompt is half of what this repository's is composed
       # from, so a runner has to have it or the check below has nothing to
       # compare against.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-unity
           ref: master
@@ -63,9 +63,9 @@ jobs:
 
       # This repository lands in a subdirectory, so $GITHUB_WORKSPACE is itself
       # a projects/ directory holding all four checkouts.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
