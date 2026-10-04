@@ -43,6 +43,12 @@ const SCRIPT_DIR = join(import.meta.dirname, "..", "binder", "scripts");
  * reason that has nothing to do with the code. This is the same reason the
  * binder's own staging directory is documented as cache-only.
  */
+// mkdir first: mkdtemp creates a directory INSIDE the prefix it is given and
+// will not create a missing parent, so on a fresh runner where ~/.cache does
+// not exist this line was the whole test file's failure --
+// `ENOENT: no such file or directory, mkdtemp
+// '/home/runner/.cache/pi-binder-tests-XXXXXX'` -- with zero checks run.
+mkdirSync(join(homedir(), ".cache"), { recursive: true });
 const work = mkdtempSync(join(homedir(), ".cache", "pi-binder-tests-"));
 /** Prefix that makes the detected Blender runnable: ["flatpak","run",app] or [binary]. */
 let blenderCommand = [];

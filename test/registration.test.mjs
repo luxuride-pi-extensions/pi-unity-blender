@@ -16,13 +16,21 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { after, describe } from "node:test";
 
 import { loadTs } from "./paths.mjs";
 
+// mkdir first: mkdtemp creates a directory INSIDE the prefix it is given and
+// will not create a missing parent. This fixture is deliberately under the CACHE
+// rather than tmpdir for the flatpak reason binder-scripts.test.mjs explains,
+// and on a fresh runner ~/.cache does not exist yet -- which made this the whole
+// file's failure, with zero checks run:
+// `ENOENT: no such file or directory, mkdtemp
+// '/home/runner/.cache/pi-binder-config-XXXXXX'`.
+mkdirSync(join(homedir(), ".cache"), { recursive: true });
 const WORK = mkdtempSync(join(homedir(), ".cache", "pi-binder-config-"));
 after(() => rmSync(WORK, { recursive: true, force: true }));
 
