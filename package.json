@@ -5,6 +5,16 @@
 	"private": true,
 	"type": "module",
 	"license": "MIT",
+	"files": [
+		"index.ts",
+		"config.ts",
+		"manager-core.ts",
+		"core/",
+		"binder/",
+		"agents/",
+		"skills/",
+		"scripts/"
+	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "node test/parse-summary.mjs && node test/manager-prompt.mjs && node --test \"test/*.test.mjs\"",
