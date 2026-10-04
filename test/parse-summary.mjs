@@ -17,7 +17,7 @@
 
 import { loadTs } from "./paths.mjs";
 
-const { parseImportSummary } = await loadTs("binder/transfer.ts");
+const { parseImportSummary, parseExportSummary } = await loadTs("binder/transfer.ts");
 
 let passed = 0;
 const failures = [];
@@ -113,6 +113,88 @@ if (last !== null) {
 }
 
 // ---------------------------------------------------------------------------
+// parseExportSummary: the Blender -> Unity direction.
+//
+// Same class of defect, opposite route. The parser accepted any line whose
+// materialNames was an array and whose vertexTotal was typeof "number", then
+// returned `vertexTotal: exported?.vertexTotal ?? 0`. So a summary that was
+// missing entirely, or malformed, became a CONFIDENT 0 -- and the result field
+// is read as "the mesh was empty", which is a claim about the user's model that
+// the binder cannot make. SKILL.md warns about this exact trap
+// ("a zero means the field was dropped, not that the mesh was empty"); the
+// warning was documented but the code contradicted it.
+// ---------------------------------------------------------------------------
+
+// What export_fbx.py actually prints, on one line.
+const EXPORT_OK =
+	'{"fbxPath": "/tmp/model.fbx", "objectNames": ["Cube", "Curve"], "materialNames": ["CurveMat", "Wood"], "textureNames": ["wood.png"], "vertexTotal": 21}';
+
+const exportOk = parseExportSummary(EXPORT_OK);
+check("a real export summary parses", exportOk !== null);
+if (exportOk !== null) {
+	eq("export objectNames survive parsing", exportOk.objectNames, ["Cube", "Curve"]);
+	eq("export materialNames survive parsing", exportOk.materialNames, ["CurveMat", "Wood"]);
+	eq("export textureNames survive parsing", exportOk.textureNames, ["wood.png"]);
+	eq("export vertexTotal survives parsing", exportOk.vertexTotal, 21);
+}
+
+// A GENUINELY empty selection still reports 0, and must keep reporting it.
+// This is why the fix cannot be "treat 0 as unknown": 0 is a real answer here,
+// and null is the answer for the case where nothing was reported at all.
+const exportEmpty = parseExportSummary(
+	'{"fbxPath": "/tmp/none.fbx", "objectNames": [], "materialNames": [], "textureNames": [], "vertexTotal": 0}',
+);
+check("an empty export parses rather than being called malformed", exportEmpty !== null);
+if (exportEmpty !== null) {
+	eq("an empty export reports a real zero", exportEmpty.vertexTotal, 0);
+}
+
+// Every way the OLD check let a bogus summary through.
+check("a missing vertexTotal is not a summary", parseExportSummary('{"objectNames": ["Cube"], "materialNames": []}') === null);
+check(
+	"a string vertexTotal is not a summary",
+	parseExportSummary('{"objectNames": ["Cube"], "materialNames": [], "vertexTotal": "21"}') === null,
+);
+check(
+	"NaN cannot survive as a count",
+	parseExportSummary('{"objectNames": ["Cube"], "materialNames": [], "vertexTotal": NaN}') === null,
+	"JSON.parse turns NaN into null, so this checks the null path",
+);
+check(
+	"a negative vertexTotal is not a count",
+	parseExportSummary('{"objectNames": ["Cube"], "materialNames": [], "vertexTotal": -5}') === null,
+	"the old typeof check accepted -5 and reported it as a real count",
+);
+check(
+	"a missing objectNames is not a summary",
+	parseExportSummary('{"materialNames": [], "vertexTotal": 3}') === null,
+	"the old check returned objectNames: [] for this, a shape export_fbx.py never prints",
+);
+check(
+	"a non-array objectNames is not a summary",
+	parseExportSummary('{"objectNames": "Cube", "materialNames": [], "vertexTotal": 3}') === null,
+	"the old check returned objectNames: [] for this too",
+);
+check("unrelated stdout yields null", parseExportSummary("nothing here\n{ not json }") === null);
+check("empty stdout yields null", parseExportSummary("") === null);
+
+// A malformed LAST line must not hide a good earlier one -- the backwards scan
+// is what makes that work, and it is the reason a tightened check is safe.
+check(
+	"a good summary before a malformed one still parses",
+	parseExportSummary(`${EXPORT_OK}\n{"objectNames": "broken"}`) !== null,
+);
+check("the last VALID summary wins", (() => {
+	const two = parseExportSummary(
+		[
+			EXPORT_OK,
+			'{"fbxPath": "/tmp/b.fbx", "objectNames": ["Second"], "materialNames": [], "textureNames": [], "vertexTotal": 2}',
+		].join("\n"),
+	);
+	return two !== null && two.objectNames[0] === "Second";
+})());
+
+// ---------------------------------------------------------------------------
 // readBridgeLock: a lock that exists but does not parse is still a HELD lock.
 //
 // This is the same defect the unity repo had. readBridgeLock caught everything
@@ -154,6 +236,6 @@ try {
 	rmSync(bridgeDir, { recursive: true, force: true });
 }
 
-console.log(`${passed} passed, ${failures.length} failed (parse summary + bridge lock)`);
+console.log(`${passed} passed, ${failures.length} failed (parse summary + export summary + bridge lock)`);
 for (const failure of failures) console.log(`  FAIL ${failure}`);
 process.exit(failures.length === 0 ? 0 : 1);

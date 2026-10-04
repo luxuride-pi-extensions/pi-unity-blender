@@ -231,7 +231,17 @@ export interface BlenderToUnityResult {
 	objectNames: string[];
 	materialNames: string[];
 	textureNames: string[];
-	vertexTotal: number;
+	/**
+	 * Null when Blender printed no parseable summary, NOT zero.
+	 *
+	 * A zero reads as "the mesh was empty", which is a claim about the user's
+	 * model that the binder cannot make: the count simply was not reported. The
+	 * same distinction matters in the other direction, where the script DOES
+	 * print 0 for a genuinely empty selection. SKILL.md warns about exactly
+	 * this -- a zero means the field was dropped, not that the mesh was empty --
+	 * and this field is where that warning is honoured.
+	 */
+	vertexTotal: number | null;
 	blenderBlendPath: string | null;
 	unityScene: string;
 	notes: string[];
@@ -356,7 +366,10 @@ export async function transferBlenderToUnity(
 		objectNames: exported?.objectNames ?? objectNames,
 		materialNames: exported?.materialNames ?? [],
 		textureNames: exported?.textureNames ?? [],
-		vertexTotal: exported?.vertexTotal ?? 0,
+		// null, never 0: see BlenderToUnityResult.vertexTotal. The note above
+		// already says the count is unknown; returning 0 here would contradict
+		// that note in the one field a caller is most likely to trust.
+		vertexTotal: exported?.vertexTotal ?? null,
 		blenderBlendPath: blender.blendPath,
 		unityScene: unity.activeScene,
 		notes,
@@ -368,6 +381,20 @@ interface ExportSummary {
 	materialNames: string[];
 	textureNames: string[];
 	vertexTotal: number;
+}
+
+/**
+ * Is this a vertex count we can believe?
+ *
+ * `typeof === "number"` alone accepts NaN, Infinity and a negative value, all of
+ * which would sail past the previous check and be reported to the caller as
+ * what Blender actually counted. NaN is the likely one -- a mesh whose vertex
+ * count overflowed or was computed from a dead struct -- and it is the most
+ * damaging, because `NaN === 0` is false in every consumer while also printing
+ * as something that looks like a number in JSON.
+ */
+function isVertexCount(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 /**
@@ -393,17 +420,29 @@ function defaultModelName(objectNames: string[]): string {
  * The export script prints one JSON object as its final stdout line. Blender may
  * interleave exporter chatter, so scan backwards for the last line that parses
  * as our summary rather than assuming the output is only that.
+ *
+ * Exported so test/parse-summary.mjs can lock the shape down, for the same
+ * reason parseImportSummary is: its accept/reject decision is invisible from the
+ * outside, and a loosened check here silently turns a malformed summary into a
+ * confident-looking result.
  */
-function parseExportSummary(stdout: string): ExportSummary | null {
+export function parseExportSummary(stdout: string): ExportSummary | null {
 	const lines = stdout.split("\n");
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
 		const line = (lines[index] ?? "").trim();
 		if (!line.startsWith("{")) continue;
 		try {
 			const parsed = JSON.parse(line) as Partial<ExportSummary>;
-			if (Array.isArray(parsed.materialNames) && typeof parsed.vertexTotal === "number") {
+			// BOTH key sets are required, and the count must be a real count.
+			// The previous check tested only materialNames and the NUMBER-ness of
+			// vertexTotal, so a line carrying a string or an object where
+			// objectNames belongs was accepted and returned as an empty list --
+			// a summary shape the script never prints, passing as real. Requiring
+			// objectNames to be an array is what makes this an actual match
+			// against export_fbx.py's output rather than a loose guess.
+			if (Array.isArray(parsed.objectNames) && Array.isArray(parsed.materialNames) && isVertexCount(parsed.vertexTotal)) {
 				return {
-					objectNames: Array.isArray(parsed.objectNames) ? parsed.objectNames : [],
+					objectNames: parsed.objectNames,
 					materialNames: parsed.materialNames,
 					textureNames: Array.isArray(parsed.textureNames) ? parsed.textureNames : [],
 					vertexTotal: parsed.vertexTotal,
@@ -658,10 +697,27 @@ export async function transferUnityToBlender(
 		);
 	}
 	if (stagedPaths.length > 0) {
+		// FBX is authored Y-up like Unity, so the importer lines the two up on
+		// its own and MUST NOT be flipped: flipping here would double-correct
+		// it and tip the model on its side. That is a real constraint of the
+		// format, not the option being ignored -- but the option is still READ
+		// here so that a caller who asked for a flip is told, in the note below,
+		// that the FBX leg could not honour it. Hardcoding `false` while the
+		// option went unread was the defect: with preferSourceModels defaulting
+		// true, a mixed transfer took this branch and the flag was never
+		// consulted anywhere.
 		steps.push({
 			kind: "fbx",
 			config: { fbxPaths: stagedPaths, collectionName, flipUpAxis: false },
 		});
+		if (options.flipUpAxis === true) {
+			notes.push(
+				"flipUpAxis was requested but does NOT apply to the source model files: FBX is Y-up like " +
+					"Unity, so the importer already lines the two up, and flipping them would double-correct " +
+					"it. They are imported at their authored orientation. Any OBJ-exported object in the same " +
+					"transfer was still flipped.",
+			);
+		}
 	}
 	if (objExport) {
 		steps.push({

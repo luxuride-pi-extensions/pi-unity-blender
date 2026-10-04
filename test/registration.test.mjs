@@ -16,7 +16,16 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { after, describe } from "node:test";
@@ -296,5 +305,145 @@ process.stdout.write("RESULT:" + JSON.stringify(await (async () => (${body}))())
 			configIn({ PI_UNITY_BLENDER_HEARTBEAT_STALE_MS: undefined }, "c.getStaleHeartbeatMs()"),
 			10_000,
 		);
+	});
+});
+
+describe("staging pruning", () => {
+	// Finding D: createStagingDir made an mkdtemp dir, appended to .transfers.log
+	// and returned. Nothing anywhere removed those directories, and nothing read
+	// the log, so every transfer left its FBX (plus a textures/ dir on the
+	// Blender -> Unity leg) in the cache forever.
+	//
+	// These run in-process against a real temp staging root rather than through
+	// a child process, because pruneStagingDirs is a pure filesystem operation
+	// with no module-load-time environment to clear -- unlike config.ts, whose
+	// instance ids are published into process.env at import time.
+
+	/** Backdate a path's mtime, which is the only age signal pruneStagingDirs reads. */
+	function age(path, ms) {
+		const when = new Date(Date.now() - ms);
+		utimesSync(path, when, when);
+	}
+
+	test("removes directories older than the stated age, and keeps everything newer", async () => {
+		const { pruneStagingDirs, STAGING_MAX_AGE_MS } = await loadTs("binder/bridge.ts");
+		const root = mkdtempSync(join(WORK, "prune-"));
+		const old = join(root, "old-transfer");
+		const fresh = join(root, "fresh-transfer");
+		mkdirSync(old);
+		mkdirSync(fresh);
+		writeFileSync(join(old, "model.fbx"), "stale");
+		writeFileSync(join(fresh, "model.fbx"), "in flight");
+		age(old, STAGING_MAX_AGE_MS + 60_000);
+		age(fresh, 60_000);
+
+		const removed = pruneStagingDirs(root);
+
+		assert.deepEqual(removed, [old], `prune reported ${JSON.stringify(removed)}`);
+		assert.ok(!existsSync(old), "the stale staging directory is still there");
+		assert.ok(existsSync(fresh), "a directory inside the age window was removed");
+		assert.equal(readFileSync(join(fresh, "model.fbx"), "utf8"), "in flight", "the fresh file was disturbed");
+	});
+
+	test("a directory exactly at the age boundary is kept", async () => {
+		// Strictly-greater-than, so the threshold is inclusive of "not yet old
+		// enough". Measured off a clock that has already ticked, so this cannot
+		// depend on a millisecond landing on the boundary.
+		const { pruneStagingDirs, STAGING_MAX_AGE_MS } = await loadTs("binder/bridge.ts");
+		const root = mkdtempSync(join(WORK, "prune-boundary-"));
+		const edge = join(root, "edge-transfer");
+		mkdirSync(edge);
+		age(edge, STAGING_MAX_AGE_MS - 60_000);
+		assert.deepEqual(pruneStagingDirs(root), [], "a directory just inside the window was removed");
+		assert.ok(existsSync(edge));
+	});
+
+	test("the number removed in one call is capped, oldest first", async () => {
+		const { pruneStagingDirs, STAGING_MAX_AGE_MS, STAGING_PRUNE_MAX_DIRS } = await loadTs("binder/bridge.ts");
+		assert.ok(STAGING_PRUNE_MAX_DIRS > 0, "a cap of zero would never prune anything");
+		const root = mkdtempSync(join(WORK, "prune-cap-"));
+		const total = STAGING_PRUNE_MAX_DIRS + 5;
+		const dirs = [];
+		for (let index = 0; index < total; index += 1) {
+			const path = join(root, `transfer-${String(index).padStart(3, "0")}`);
+			mkdirSync(path);
+			// Age them in reverse so directory NAME order is the opposite of age
+			// order, which is what proves the sort is by mtime and not by name.
+			age(path, STAGING_MAX_AGE_MS + (total - index) * 60_000);
+			dirs.push(path);
+		}
+
+		const removed = pruneStagingDirs(root);
+
+		assert.equal(removed.length, STAGING_PRUNE_MAX_DIRS, `removed ${removed.length} dirs, cap is ${STAGING_PRUNE_MAX_DIRS}`);
+		assert.deepEqual(
+			removed,
+			dirs.slice(0, STAGING_PRUNE_MAX_DIRS),
+			"the cap did not keep the OLDEST directories",
+		);
+		assert.ok(existsSync(dirs[total - 1]), "the newest stale directory was removed while older ones were kept");
+	});
+
+	test("a concurrent transfer's own directory is never a candidate", async () => {
+		// The property the cap exists to protect, stated directly: the directory
+		// a transfer is creating right now is younger than the age window, so no
+		// cap and no ordering can reach it.
+		const { pruneStagingDirs, STAGING_MAX_AGE_MS } = await loadTs("binder/bridge.ts");
+		const root = mkdtempSync(join(WORK, "prune-concurrent-"));
+		for (let index = 0; index < 30; index += 1) {
+			const path = join(root, `stale-${index}`);
+			mkdirSync(path);
+			age(path, STAGING_MAX_AGE_MS + 60_000);
+		}
+		const concurrent = join(root, "unity-to-blender-live");
+		mkdirSync(concurrent);
+
+		pruneStagingDirs(root);
+
+		assert.ok(existsSync(concurrent), "a live transfer's staging directory was pruned");
+	});
+
+	test("files and symlinks in the staging root are never removed", async () => {
+		// .transfers.log is a FILE in this directory and must survive, so the
+		// prune has to be directory-only. The symlink case is why isDirectory()
+		// is checked instead of just deleting whatever is old: a symlink to a
+		// directory reports isSymbolicLink(), and recursive removal would follow
+		// it out of the cache entirely.
+		const { pruneStagingDirs, STAGING_MAX_AGE_MS } = await loadTs("binder/bridge.ts");
+		const root = mkdtempSync(join(WORK, "prune-files-"));
+		const outside = mkdtempSync(join(WORK, "prune-outside-"));
+		writeFileSync(join(outside, "keep-me.txt"), "not staging");
+		const logPath = join(root, ".transfers.log");
+		writeFileSync(logPath, "2026-01-01T00:00:00.000Z /some/old/dir\n");
+		const link = join(root, "link-to-elsewhere");
+		symlinkSync(outside, link, "dir");
+		age(logPath, STAGING_MAX_AGE_MS * 10);
+		age(link, STAGING_MAX_AGE_MS * 10);
+
+		const removed = pruneStagingDirs(root);
+
+		assert.deepEqual(removed, [], `prune tried to remove ${JSON.stringify(removed)}`);
+		assert.ok(existsSync(logPath), "the transfer log was removed");
+		assert.ok(existsSync(join(outside, "keep-me.txt")), "the prune followed a symlink out of the cache");
+	});
+
+	test("createStagingDir prunes, and still returns a usable fresh directory", async () => {
+		const { createStagingDir, STAGING_MAX_AGE_MS } = await loadTs("binder/bridge.ts");
+		const root = mkdtempSync(join(WORK, "prune-create-"));
+		const stale = join(root, "blender-to-unity-stale");
+		mkdirSync(stale);
+		age(stale, STAGING_MAX_AGE_MS + 60_000);
+
+		const dir = createStagingDir("unity-to-blender", root);
+
+		assert.ok(existsSync(dir), "createStagingDir did not return an existing directory");
+		assert.ok(!existsSync(stale), "createStagingDir did not prune the stale directory");
+		assert.ok(readFileSync(join(root, ".transfers.log"), "utf8").includes(dir), "the transfer was not logged");
+	});
+
+	test("a staging root that cannot be read prunes nothing and does not throw", async () => {
+		// Housekeeping must never be the reason a transfer cannot start.
+		const { pruneStagingDirs } = await loadTs("binder/bridge.ts");
+		assert.deepEqual(pruneStagingDirs(join(WORK, "does-not-exist-at-all")), []);
 	});
 });
