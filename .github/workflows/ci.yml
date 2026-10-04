@@ -112,6 +112,18 @@ jobs:
           for repo in pi-blender pi-unity; do
             (cd "projects/$repo" && npm ci --legacy-peer-deps)
           done
+          # This repository IS projects/pi-unity-blender, so it needs the same
+          # install from the workspace root rather than through the loop above.
+          # Omitting it was not caught by the typecheck passing, because
+          # `tsc --noEmit` reads `compilerOptions.types: ["node"]` against
+          # node_modules/@types -- and with no node_modules at all that is
+          #
+          #   error TS2688: Cannot find type definition file for 'node'.
+          #   The file is in the program because:
+          #     Entry point of type library 'node' specified in compilerOptions
+          #
+          # which reads like a broken tsconfig rather than a missing install.
+          npm ci --legacy-peer-deps
 
       # test/manager-prompt.mjs reads the extensions INSTALLED under
       # PI_AGENT_DIR, not from sibling checkouts: a checkout that is not
