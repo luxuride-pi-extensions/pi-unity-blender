@@ -60,27 +60,61 @@ let blenderCommand = [];
  */
 const SCRIPTS = ["export_fbx", "import_fbx", "import_obj"];
 
-before(async () => {
+// Detection runs HERE, at module scope, and not in a `before` hook -- see the
+// comment on BLENDER for why that is the whole fix.
+const { detectBlender } = await loadTs("binder/editors.ts");
+const detected = await detectBlender();
+
+/**
+ * The Blender these tests run in, or the reason there is none.
+ *
+ * THREE separate bugs lived in "skip this file when there is no Blender", and
+ * each one only shows on a machine WITHOUT Blender -- which is exactly the
+ * runner, and exactly why this went unnoticed until CI:
+ *
+ * 1. `detected.searched` does not exist. EditorDetection is
+ *    {found, how, detail}, so `detected.searched.join(", ")` raised
+ *    `Cannot read properties of undefined (reading 'join')` INSIDE the hook,
+ *    where node:test reports it as the file's own failure and cancels every
+ *    test in it. The skip was never reached.
+ *
+ * 2. A `skip()` called inside `before` does not reach tests nested in
+ *    `describe`. The hook is the FILE's; a test inside describe("import_obj")
+ *    is the SUITE's. node:test let them start and then cancelled each with
+ *    `test did not finish before its parent and was cancelled` -- 17 failures
+ *    that all read like broken tests and were one missing binary.
+ *
+ * 3. So the skip moved to each test's own `skip` option -- and a function there
+ *    is evaluated when the test is REGISTERED, which is before any hook has run
+ *    and before any module-level state is set. Measured on node 22.23, every
+ *    return value skips, truthy or not:
+ *      skip: () => true / false / null / undefined / 0 / "" / "x"  -> skipped
+ *    A function is for computing the reason, not for deciding whether to skip.
+ *
+ * So detection happens at module scope, before a single test is declared, and
+ * the boolean is baked into the option object. Nothing here needs `skip()`'s
+ * ability to abort a running file, because by the time any test could start the
+ * answer is already known.
+ */
+const ROUTES = ["$BLENDER_PATH", "/Applications/Blender.app", "flatpak org.blender.Blender", "blender on PATH"];
+/** Prefixed to the detected command so a mis-skip names itself in the log. */
+const NEEDS_BLENDER = { skip: detected.found ? false : `no Blender found; checked ${ROUTES.join(", ")}` };
+
+before(() => {
 	mkdirSync(join(homedir(), ".cache"), { recursive: true });
-	// Through jiti, like every other suite here: the extension's own imports
-	// carry NodeNext ".js" specifiers that only a TypeScript-aware loader
-	// resolves.
-	const { detectBlender } = await loadTs("binder/editors.ts");
-	const detected = await detectBlender();
-	if (!detected.found) {
-		// One skip covers the whole file, and it says which way to fix it, so a
-		// green run here is never mistaken for a passing run.
-		const { skip } = await import("node:test");
-		skip(`no Blender found: ${detected.searched.join(", ")}`);
-		return;
+	if (detected.found) {
+		// detectBlender reports an APP ID for flatpak and a command otherwise, so
+		// the id has to become a `flatpak run` before it can be exec'd. Deciding
+		// that here rather than in editors.ts is the point: the binder never
+		// launches Blender itself (it talks to the live session's bridge), so a
+		// runnable command is a thing only this suite needs.
+		blenderCommand = detected.how === "flatpak" ? ["flatpak", "run", detected.detail] : [detected.detail.split(/\s+/)[0]];
+		process.stderr.write(`binder-scripts: using Blender via ${detected.how} (${detected.detail})\n`);
+	} else {
+		// stderr, not stdout: the reporter counts stdout, and a reason for
+		// skipping belongs beside the SKIP markers either way.
+		process.stderr.write(`binder-scripts: skipping -- ${NEEDS_BLENDER.skip}\n`);
 	}
-	// detectBlender reports an APP ID for flatpak and a command otherwise, so
-	// the id has to become a `flatpak run` before it can be exec'd. Deciding
-	// that here rather than in editors.ts is the point: the binder never
-	// launches Blender itself (it talks to the live session's bridge), so a
-	// runnable command is a thing only this suite needs.
-	blenderCommand = detected.how === "flatpak" ? ["flatpak", "run", detected.detail] : [detected.detail.split(/\s+/)[0]];
-	process.stderr.write(`binder-scripts: using Blender via ${detected.how} (${detected.detail})\n`);
 });
 
 after(() => {
@@ -172,8 +206,8 @@ function fixture(name, body) {
 /** The shape every fixture starts from: nothing selected, nothing in the scene. */
 const CLEAR = "import bpy\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()\n";
 
-describe("binder scripts", () => {
-	describe("the render step", () => {
+describe("binder scripts", NEEDS_BLENDER, () => {
+	describe("the render step", NEEDS_BLENDER, () => {
 		test("every script in binder/scripts is covered by this file", () => {
 			for (const name of SCRIPTS) {
 				assert.ok(
@@ -183,7 +217,7 @@ describe("binder scripts", () => {
 			}
 		});
 
-		test("a rendered script is valid Python with the config baked in", async () => {
+		test("a rendered script is valid Python with the config baked in", NEEDS_BLENDER, async () => {
 			const { renderBinderScript } = await loadTs("binder/script-template.ts");
 			const destination = renderBinderScript(
 				"export_fbx",
@@ -198,8 +232,8 @@ describe("binder scripts", () => {
 		});
 	});
 
-	describe("import_obj", () => {
-		test("names the object after the GameObject, not the file", () => {
+	describe("import_obj", NEEDS_BLENDER, () => {
+		test("names the object after the GameObject, not the file", NEEDS_BLENDER, () => {
 			// The regression: without use_split_groups the importer ignores the
 			// `g` line and calls the object after the FILE, so identity is lost
 			// across a Unity -> Blender round trip.
@@ -221,7 +255,7 @@ describe("binder scripts", () => {
 			assert.equal(out.collectionName, "Pi_Imported");
 		});
 
-		test("collects the batch under one collection", () => {
+		test("collects the batch under one collection", NEEDS_BLENDER, () => {
 			const objPath = join(work, "two-objects.obj");
 			writeFileSync(objPath, "g Alpha\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\ng Beta\nf 1 2 3\n");
 			const out = summary(
@@ -240,7 +274,7 @@ describe("binder scripts", () => {
 			assert.equal(out.collectionName, "Pi_Batch");
 		});
 
-		test("a missing file is an error, not a silent empty import", () => {
+		test("a missing file is an error, not a silent empty import", NEEDS_BLENDER, () => {
 			runExpectingFailure(
 				render("import_obj", {
 					objPath: join(work, "does-not-exist.obj"),
@@ -254,8 +288,8 @@ describe("binder scripts", () => {
 		});
 	});
 
-	describe("export_fbx", () => {
-		test("a rig crosses with its bones", () => {
+	describe("export_fbx", NEEDS_BLENDER, () => {
+		test("a rig crosses with its bones", NEEDS_BLENDER, () => {
 			// The regression this suite exists for. Exported without ARMATURE in
 			// object_types, this exact scene produced a file that reimported with
 			// no armature at all -- and a file, so nothing failed.
@@ -300,7 +334,7 @@ print("ARMATURES=" + _json.dumps(armatures))
 			assert.equal(armatures[0][1], 2, `expected 2 bones, got ${armatures[0][1]}`);
 		});
 
-		test("a curve crosses as geometry and the user's scene keeps its curve", () => {
+		test("a curve crosses as geometry and the user's scene keeps its curve", NEEDS_BLENDER, () => {
 			// Also a real defect: a CURVE is not in object_types, so a curve-only
 			// export produced a valid, non-empty FBX that reimported as an EMPTY
 			// scene. And object.convert() rewrites in place, so converting the
@@ -345,7 +379,7 @@ print("REIMPORTED=" + _json.dumps(sorted((o.name, o.type) for o in bpy.data.obje
 			assert.match(line, /MyCurve.*MESH/, "the curve did not reimport as a mesh");
 		});
 
-		test("the user's scene is left as it was found", () => {
+		test("the user's scene is left as it was found", NEEDS_BLENDER, () => {
 			// The other half of the curve defect: a conversion that rewrote the
 			// original in place would leave the user's .blend restructured by a
 			// read-only transfer, and the binder saves the .blend.
@@ -371,7 +405,7 @@ print("LEFTOVER=" + repr(sorted(o.name for o in bpy.data.objects if o.type not i
 			assert.match(said, /LEFTOVER=\[\]/, "a conversion copy was left behind in the user's scene");
 		});
 
-		test("a named object that does not exist is an error naming what is available", () => {
+		test("a named object that does not exist is an error naming what is available", NEEDS_BLENDER, () => {
 			runExpectingFailure(
 				render("export_fbx", {
 					outPath: join(work, "never.fbx"),
@@ -383,8 +417,8 @@ print("LEFTOVER=" + repr(sorted(o.name for o in bpy.data.objects if o.type not i
 		});
 	});
 
-	describe("import_fbx", () => {
-		test("a rig crosses with its bones and is reported as one", () => {
+	describe("import_fbx", NEEDS_BLENDER, () => {
+		test("a rig crosses with its bones and is reported as one", NEEDS_BLENDER, () => {
 			// The source-model route is the one that carries rigs, so this is the
 			// claim the binder's whole format asymmetry rests on.
 			//
@@ -429,7 +463,7 @@ bpy.ops.export_scene.fbx(filepath=@WORK@ + "/source.fbx", use_selection=True, ob
 			assert.ok(out.vertexTotal > 0, "no geometry crossed");
 		});
 
-		test("an fbx with no bones reports an empty armature list rather than failing", () => {
+		test("an fbx with no bones reports an empty armature list rather than failing", NEEDS_BLENDER, () => {
 			runInBlender(
 				fixture("fbx-plain", `${CLEAR}
 bpy.ops.mesh.primitive_cube_add()
@@ -450,7 +484,7 @@ bpy.ops.export_scene.fbx(filepath=@WORK@ + "/plain.fbx", use_selection=True, obj
 			assert.ok(out.importedNames.includes("PlainCube"), `got ${out.importedNames.join(", ")}`);
 		});
 
-		test("an fbx path that does not exist is an error naming the path", () => {
+		test("an fbx path that does not exist is an error naming the path", NEEDS_BLENDER, () => {
 			runExpectingFailure(
 				render("import_fbx", {
 					fbxPaths: [join(work, "nope.fbx")],
