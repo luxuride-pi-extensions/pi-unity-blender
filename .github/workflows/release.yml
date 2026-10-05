@@ -58,6 +58,31 @@ jobs:
         with:
           node-version: 22
 
+      # The binder's three scripts ARE the product -- they are what moves
+      # meshes between a live Blender and a live Unity -- and they are Python
+      # files named in `files`. A release published without them ships a
+      # tarball whose every transfer call fails at runtime, so the release
+      # lane is the last place that can be sure Python can execute them.
+      # Cheaper here than in the pi-manager-core packaging job, because this
+      # is already the job that packs the tarball.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: the shipped binder scripts parse and compile under this Python
+        run: |
+          set -euo pipefail
+          count=0
+          for py in binder/scripts/*.py; do
+            python3 -m py_compile "$py"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "no Python scripts found under binder/scripts/ to compile" >&2
+            exit 1
+          fi
+          echo "ok $count binder script(s) compile under $(python3 -V)"
+
       - name: resolve the tag
         id: tag
         run: |
@@ -117,6 +142,7 @@ jobs:
           npm pack --dry-run --json > pack.json
           node -e '
             const fs = require("node:fs");
+            const { existsSync } = fs;
             const pkg = require("./package.json");
             const packed = JSON.parse(fs.readFileSync("pack.json", "utf8"));
             // npm keys the payload by package name, and older npm returns an
@@ -130,6 +156,52 @@ jobs:
             for (const e of entries) {
               const rel = e.replace(/^\.\//, "");
               if (!paths.includes(rel)) missing.push(`extension entry ${rel}`);
+            }
+            // The directories pi actually LOADS at runtime, not just the
+            // entry points. An entry-point-only check is what let a `files`
+            // list that named index.ts and nothing else pass: the extension
+            // installs, its manager prompt loads, and every tool it
+            // registers fails to import a module that was never shipped.
+            //
+            //
+            // Keyed by package name and skipped when the source directory
+            // does not exist, so this one block is correct in all four
+            // repositories and stays correct in a fifth. That shape is
+            // deliberate: a per-repo literal list would have to be edited in
+            // four places, and the directory it forgets is the one that costs
+            // the most and complains the least -- a skills/ directory missing
+            // from the tarball removes a capability and throws nothing. The
+            // names below are ALWAYS_SHIP and SKILL_DIRS from
+            // pi-manager-core/test/package-contents.mjs, the same assertion
+            // on the CI side, where it only runs under PI_REQUIRE_PACKAGES=1.
+            const ALWAYS_SHIP = ["core/", "scripts/", "agents/"];
+            const SKILL_DIRS = {
+              "pi-blender": ["blender/skills"],
+              "pi-unity": ["unity/skills"],
+              "pi-unity-blender": ["skills"],
+            };
+            // The module directory each repository imports live under,
+            // which is the part the package.json files list most often
+            // ships, the extension registers its tools, and every tool fails
+            // on the module it could not find.
+            const MODULE_DIRS = {
+              "pi-blender": ["blender/"],
+              "pi-unity": ["unity/"],
+              "pi-unity-blender": ["binder/"],
+              "pi-manager-core": ["shared/"],
+            };
+            const runtime = [
+              ...ALWAYS_SHIP,
+              ...(SKILL_DIRS[pkg.name] ?? []),
+              ...(MODULE_DIRS[pkg.name] ?? []),
+            ];
+            for (const d of runtime) {
+              if (!existsSync(d)) continue;
+              if (!paths.some((x) => x.startsWith(d))) {
+                missing.push(
+                  `${d} exists on disk but nothing from it ships, so the extension cannot load it`,
+                );
+              }
             }
             for (const bad of ["test/", ".github/"]) {
               const shipped = paths.filter((x) => x.startsWith(bad));
