@@ -2,7 +2,34 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    # Every branch `git branch -a` currently shows, and no others. This list
+    # was [master] alone, which meant nothing ran for the branch all four
+    # repos were actually developed on: `feat/packaging` sat fully pushed
+    # and no CI run had ever existed for its head. Do NOT "tidy" this back
+    # to [master] -- that is the exact shape of the finding.
+    #
+    #   master
+    #     the release branch; its run is the pre-merge gate.
+    #   feat/packaging
+    #     the packaging lane, in flight across all four repos (the `files`
+    #     lists and release.yml).
+    #   fix/ci-checkout-order
+    #     the lane that established this repo's checkout order, which is
+    #     load-bearing -- see the checkout comment in the `agreement` job.
+    #   fix/review-findings
+    #     the review-findings lane this fix belongs to.
+    #   ci/github-actions
+    #     the lane that stands up the GitHub Actions workflow itself, so
+    #     its changes need a runner to judge.
+    #
+    # When a lane is added, add it here. The check is one command:
+    #   git branch -a --format='%(refname:short)' | grep -v HEAD
+    branches:
+      - master
+      - feat/packaging
+      - fix/ci-checkout-order
+      - fix/review-findings
+      - ci/github-actions
   pull_request:
   workflow_dispatch:
 
