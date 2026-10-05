@@ -205,9 +205,13 @@ result unreadable. Delete it, purge the orphaned data, and say that you did.
 - **A material rendering white.** A lilToon material in a built-in-pipeline
   project assigns, passes every property check, and renders pure white with no
   error. Check the render pipeline before suspecting the transfer.
-- **Vertex count zero in a result field.** The export summary carries
-  `vertexTotal`; a zero means the field was dropped, not that the mesh was
-  empty. Re-verify on the receiving side instead of trusting the report.
+- **Vertex count that is missing, or zero, in a result field.** Blender →
+  Unity returns `vertexTotal: null` when its summary line was missing or
+  malformed — **null, not zero**, because a zero reads as "the mesh was
+  empty" and the binder cannot make that claim about your model. A *genuinely*
+  empty selection still reports `0`, so the two are distinguishable: trust
+  `null` as "unknown" and `0` as "empty". If either is what you got, verify on
+  the receiving side instead of trusting the report.
 - **A count that matches but a rig that did not come across.** An FBX carries
   its bones; an OBJ never does. If the direction was OBJ, no armature is
   expected, and its absence is not a bug.
@@ -243,3 +247,6 @@ Intermediates (FBX, OBJ, MTL, textures) are staged in pi's cache directory,
 never inside a project or a `.blend`. A user who aborts a transfer must not
 find junk in `Assets/`. The staging path is in `unity_blender_status`; the
 `unity-blender` staging directory also keeps a `.transfers.log` of every run.
+Directories older than 24 h are pruned at the start of the next transfer, ten
+per transfer, oldest first — so the log is a history, not a promise that every
+run's files are still there.
