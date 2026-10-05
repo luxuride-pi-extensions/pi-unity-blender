@@ -39,18 +39,21 @@ permissions:
 jobs:
   # The only job here used to be
   #     if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
-  # and `vars` is a repository VARIABLE, not a secret, and it was never set --
-  # so every run of this workflow reported SUCCESS having executed zero jobs.
-  # That is the most dangerous failure mode in the suite, because a green tick
-  # on a check that never ran is indistinguishable from a green tick on a check
+  # `vars` is a repository VARIABLE, not a secret. It happens to be set to '1'
+  # here today, and nothing in the repository says so -- no workflow, script or
+  # doc sets or reads it, and `gh api .../actions/variables` is the only place
+  # the value exists. Unset it, or clone this file to a repo that never had it,
+  # and every run of this workflow reports SUCCESS having executed zero jobs:
+  # the most dangerous failure mode in the suite, because a green tick on a
+  # check that never ran is indistinguishable from a green tick on a check
   # that passed.
   #
-  # Neither half of the old gate was a reason to gate a job. A job-level `if`
-  # cannot read `secrets` at all (only github/needs/vars/inputs are in scope),
-  # so the real condition -- "does this runner have CONSUMER_TOKEN" -- is not
-  # expressible as a job `if`, and expressing a proxy for it as an unset
-  # VARIABLE is what produced the silent no-op. A condition a step can read is
-  # a condition a step can enforce.
+  # Nor was the gate a reason to gate. A job-level `if` cannot read `secrets`
+  # at all (only github/needs/vars/inputs are in scope), so the real condition
+  # -- "does this runner have CONSUMER_TOKEN" -- is not expressible as a job
+  # `if`, and expressing a proxy for it as a VARIABLE is what put the whole
+  # suite behind something nobody could see from the file. A condition a step
+  # can read is a condition a step can enforce.
   #
   # Neither job is gated now, and between them they cover every check that
   # used to live behind the variable:
