@@ -26,7 +26,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { after, before, describe } from "node:test";
@@ -35,6 +43,18 @@ import { loadTs } from "./paths.mjs";
 
 const PLACEHOLDER = "__PI_BINDER_CONFIG__";
 const SCRIPT_DIR = join(import.meta.dirname, "..", "binder", "scripts");
+
+/**
+ * The interpreter used for the syntax checks, resolved through PATH rather than
+ * hardcoded. These checks do not run Blender -- they only compile a rendered
+ * file -- so they are NOT behind NEEDS_BLENDER, and must therefore work on a
+ * machine with no Blender at all. That also means a runner without python3
+ * needs a named reason, not an ENOENT inside an assert.
+ */
+const pythonFound = spawnSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
+const PYTHON = pythonFound.status === 0 ? "python3" : "";
+/** These checks need python3 but NOT Blender. */
+const NEEDS_PYTHON = { skip: PYTHON === "" ? "python3 not found on PATH; cannot check rendered scripts" : false };
 
 /**
  * Scratch space is under the CACHE, never tmpdir. A flatpak Blender cannot see
@@ -54,15 +74,27 @@ const work = mkdtempSync(join(homedir(), ".cache", "pi-binder-tests-"));
 let blenderCommand = [];
 
 /**
- * Every script in binder/scripts, so a NEW script cannot be added without a
- * test. A hardcoded list is how export_fbx.py's rig bug stayed invisible: the
- * list of scripts that mattered was written down somewhere else.
+ * Every script in binder/scripts, GLOBBED -- so a NEW script cannot be added
+ * without a test.
+ *
+ * The list was hardcoded, which is precisely the failure its own comment warns
+ * about: the list of scripts that mattered lived somewhere else, so adding a
+ * fourth .py changed nothing here and the new script shipped untested. That is
+ * how export_fbx.py's rig bug stayed invisible.
+ *
+ * Globbed at module scope rather than inside the test so the "covered" set is
+ * read once from disk, and asserted EQUAL in both directions below: an extra
+ * file must fail, and so must a name listed here that is gone.
  */
-const SCRIPTS = ["export_fbx", "import_fbx", "import_obj"];
+const SCRIPTS = readdirSync(SCRIPT_DIR)
+	.filter((name) => name.endsWith(".py"))
+	.map((name) => name.replace(/\.py$/, ""))
+	.sort();
 
 // Detection runs HERE, at module scope, and not in a `before` hook -- see the
 // comment on BLENDER for why that is the whole fix.
 const { detectBlender } = await loadTs("binder/editors.ts");
+const { renderBinderScript } = await loadTs("binder/script-template.ts");
 const detected = await detectBlender();
 
 /**
@@ -169,17 +201,65 @@ function runExpectingFailure(scriptPath, pattern, timeoutMs) {
 	assert.match(said, pattern, `the failure did not name the cause:\n${said.slice(-3000)}`);
 }
 
-/** Render a binder script the way binder/script-template.ts does. */
+/**
+ * Render a binder script through the REAL renderer.
+ *
+ * This used to re-implement the substitution itself -- read the template,
+ * assert the placeholder is there, JSON.stringify the config, replace, write.
+ * A copy of the renderer inside the file that tests the renderer means the two
+ * can drift, and the drift is invisible: the tests would keep passing against
+ * the copy while binder/script-template.ts did something else. So it calls the
+ * real function, and the only thing this helper still owns is the temp path.
+ */
 function render(name, config) {
-	const source = readFileSync(join(SCRIPT_DIR, `${name}.py`), "utf8");
-	assert.ok(
-		source.includes(PLACEHOLDER),
-		`${name}.py no longer contains ${PLACEHOLDER}; binder/script-template.ts would refuse it.`,
-	);
-	const destination = join(work, `${name}-${Math.random().toString(36).slice(2)}.py`);
-	writeFileSync(destination, source.replace(PLACEHOLDER, JSON.stringify(config, undefined, 2)), "utf8");
-	return destination;
+	return renderBinderScript(name, config, join(work, `${name}-${Math.random().toString(36).slice(2)}.py`));
 }
+
+/**
+ * A config hostile in every way the baked-in-literal contract has to survive.
+ *
+ * Every one of these is a name or path that can occur in a real project: a
+ * Unity GameObject may be called anything a user typed, and a staged path is
+ * built from the model's own name. The list covers the four things that break
+ * a naive interpolation -- double quotes, newlines, backslashes, and the
+ * dollar-brace shape that a template language would expand -- plus Python's own
+ * triple-quote and raw-string delimiters, since the literal is wrapped in r\"\"\".
+ */
+const HOSTILE_CONFIG = {
+	outPath: '/tmp/qu"o\\te\nnew.py',
+	mtlPath: null,
+	objectNames: [
+		'He said "hello"',
+		"line1\nline2",
+		"back\\slash",
+		"${injected}",
+		"\'\'\' + os.system(\"touch \" + PWNED_MARKER + \"\") + \'\'\'",
+		'"""',
+		"r\"\"",
+	],
+	collectionName: "Pi_'Quoted'",
+	flipUpAxis: true,
+};
+
+/** Where the canary value would create a file if it were ever EXECUTED. */
+const PWNED_MARKER = join(work, "pwned-canary");
+
+/**
+ * Read a rendered script's baked config back out the way the script itself
+ * does -- json.loads over the r-string literal -- and print it as JSON.
+ *
+ * Deliberately duplicates the extraction rather than running the script: the
+ * script imports bpy, so it cannot be imported here, and running it with a
+ * Blender-specific stub would test the stub. Regex on the exact shape the
+ * templates use is enough to prove the literal itself round-trips.
+ */
+const READ_CONFIG_LITERAL = [
+	"import json, re, sys",
+	"text = open(sys.argv[1], encoding='utf-8').read()",
+	"m = re.search(r'json\\.loads\\(r?\"\"\"(.*?)\"\"\"\\)', text, re.S)",
+	"assert m, 'no baked config literal found'",
+	"print(json.dumps(json.loads(m.group(1))))",
+].join("\n");
 
 /** The JSON summary a script prints as its last line. */
 function lastJsonLine(stdout) {
@@ -207,28 +287,87 @@ function fixture(name, body) {
 const CLEAR = "import bpy\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()\n";
 
 describe("binder scripts", NEEDS_BLENDER, () => {
-	describe("the render step", NEEDS_BLENDER, () => {
+	describe("the render step", () => {
 		test("every script in binder/scripts is covered by this file", () => {
-			for (const name of SCRIPTS) {
-				assert.ok(
-					existsSync(join(SCRIPT_DIR, `${name}.py`)),
-					`${name}.py is listed here but not on disk`,
-				);
-			}
+			// SCRIPTS is globbed from disk, so this asserts the two sets are the
+			// same. It also fails if binder/scripts has no .py at all, which a
+			// hardcoded list would have reported as a pass.
+			assert.ok(SCRIPTS.length > 0, `no .py scripts found in ${SCRIPT_DIR}`);
+
+			// Which of the globbed scripts this file actually renders somewhere.
+			// Read from this file's OWN source, so "covered" means a real call,
+			// not a name written down here -- which is what made the hardcoded
+			// list worthless.
+			const rendered = new Set(
+				[...readFileSync(import.meta.filename, "utf8").matchAll(/render\(\s*"(\w+)"/g)].map((m) => m[1]),
+			);
+			// Equal in both directions, so a new script on disk and a script
+			// deleted from disk both fail.
+			assert.deepEqual(
+				SCRIPTS,
+				[...rendered].sort(),
+				`binder/scripts holds [${SCRIPTS.join(", ")}] but this file renders [${[...rendered].sort().join(", ")}]`,
+			);
 		});
 
-		test("a rendered script is valid Python with the config baked in", NEEDS_BLENDER, async () => {
-			const { renderBinderScript } = await loadTs("binder/script-template.ts");
-			const destination = renderBinderScript(
-				"export_fbx",
-				{ outPath: join(work, "syntax.fbx"), objectNames: [] },
-				join(work, "syntax.py"),
+		test("every rendered script compiles, and its config survives as DATA", NEEDS_PYTHON, () => {
+			// The config is baked in as a JSON literal inside an r-string, which is
+			// the only reason a user's object name containing a quote or a newline
+			// cannot break the script. That claim was previously "checked" by
+			// asserting the rendered text contained '"outPath"' -- which is true of
+			// the untouched template, so it passed for any config at all and never
+			// parsed a line of Python. The comment even named the hostile case as
+			// the interesting one, then passed a config with nothing hostile in it.
+			//
+			// So: render each script with a config hostile in every way JSON can be
+			// asked to escape, and COMPILE the result.
+			for (const script of SCRIPTS) {
+				const destination = renderBinderScript(script, HOSTILE_CONFIG, join(work, `syntax-${script}.py`));
+				const text = readFileSync(destination, "utf8");
+				assert.ok(!text.includes(PLACEHOLDER), `${script}.py still contains ${PLACEHOLDER} after rendering`);
+				assert.ok(text.includes("CONFIG = json.loads"), `${script}.py lost its config load`);
+
+				// py_compile, not an import: importing would execute the module,
+				// which needs bpy and only exists inside Blender. Compiling is the
+				// syntax check, which is exactly what a broken escape produces.
+				const compiled = spawnSync(PYTHON, ["-m", "py_compile", destination], { encoding: "utf8" });
+				assert.equal(
+					compiled.status,
+					0,
+					`${script}.py did not compile with a hostile config:\n${compiled.stderr}`,
+				);
+
+				// Compiling is not enough. A mis-escaped literal is still valid
+				// Python -- it just hands the script a DIFFERENT path than the one
+				// passed in, which fails at run time inside Blender with a path
+				// error. So read the literal back the way the script does and
+				// compare it to what was passed. This is the assertion that would
+				// have caught a shell or string-interpolation regression.
+				const readBack = spawnSync(
+					PYTHON,
+					["-c", READ_CONFIG_LITERAL, destination],
+					{ encoding: "utf8" },
+				);
+				assert.equal(
+					readBack.status,
+					0,
+					`could not re-read ${script}.py's baked config the way the script does:\n${readBack.stderr}`,
+				);
+				assert.deepEqual(
+					JSON.parse(readBack.stdout.trim()),
+					HOSTILE_CONFIG,
+					`${script}.py's baked config did not survive the round trip -- the escaping is wrong`,
+				);
+			}
+
+			// The canary: if any part of the pipeline built the file by string
+			// substitution, this value is Python SOURCE rather than a string, and
+			// it runs at import. Compiling alone would not notice, because the
+			// substituted source is syntactically fine.
+			assert.ok(
+				!existsSync(PWNED_MARKER),
+				"a config value was executed as Python source: the config is not being interpolated as data",
 			);
-			const text = readFileSync(destination, "utf8");
-			assert.ok(!text.includes(PLACEHOLDER), "the placeholder survived rendering");
-			// A name from the user's scene is the reason JSON is used, so a name
-			// with a quote and a newline in it is the case that matters.
-			assert.ok(text.includes('"outPath"'), "the config was not interpolated");
 		});
 	});
 

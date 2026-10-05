@@ -36,12 +36,109 @@ function eq(name, actual, expected) {
 	check(name, a === e, `expected ${e}, got ${a}`);
 }
 
+// ---------------------------------------------------------------------------
+// A CAPTURED stdout, next to the reconstructed one below.
+//
+// The reconstruction is a round trip of the parser's own contract: it was
+// written from what the parser should accept, so it can detect a field being
+// DROPPED but not a change in what Blender actually prints. This one is real.
+//
+// Captured on 2026-10-04 from Blender 5.2.0 LTS (flatpak org.blender.Blender)
+// running the REAL binder scripts: a two-group OBJ imported with flipUpAxis
+// true, then an FBX of a cube named with a non-ASCII name. Three facts in it
+// are not in the reconstruction and would not have been guessed:
+//
+//   1. Blender JSON-encodes non-ASCII as \uXXXX -- "ICO\u7403.001" for
+//      "ICO球.001". A parser doing anything with the NAME rather than passing
+//      it through would mis-handle this, and only a captured line shows it.
+//   2. Blender's OWN chatter interleaves with the script's output and comes
+//      AFTER it: "OBJ import of 'cap.obj' took 0.16 ms" and the banner line
+//      print below the last summary. The backwards scan exists for exactly
+//      this, and here it is with real text rather than an idealised
+//      "Blender chatter" placeholder.
+//   3. A dropped-keyword NOTE from the importer ("does not support
+//      ['add_leaf_bones']") lands on stdout between two summaries, so a
+//      transfer with both routes really does print a non-JSON line after a
+//      valid one.
+//
+// Note what this still cannot detect: the scripts' OUTPUT format is defined by
+// the scripts, and only Blender's surrounding output is captured here. A change
+// to what import_fbx.py prints is still invisible to both fixtures -- what they
+// catch is a change to the PARSER's idea of that shape. Keeping both is the
+// point: the reconstruction pins the contract, the capture pins the
+// environment.
+// ---------------------------------------------------------------------------
+const CAPTURED_OUTPUT = [
+	"FBX export starting... '/home/runner/.cache/pi-binder-tests-x1/cap.fbx'",
+	"export finished in 0.0018 sec.",
+	'{"importedNames": ["Armature"], "materialNames": [], "collectionName": "Pi_Imported", "vertexTotal": 3, "flippedRoots": ["Armature"]}',
+	"NOTE: this Blender's FBX importer does not support ['add_leaf_bones']; skipped",
+	"FBX version: 7400",
+	'{"importedNames": ["ICO\u7403.001"], "materialNames": [], "collectionName": "Pi_Imported", "vertexTotal": 8, "importedFiles": ["cap.fbx"], "armatures": [], "flippedRoots": []}',
+	"Blender 5.2.0 LTS (hash fbe6228777e7 built 2026-07-14 01:32:04)",
+	"OBJ import of 'cap.obj' took 0.16 ms",
+	"Blender quit",
+	"",
+].join("\n");
+
+const capturedLast = parseImportSummary(CAPTURED_OUTPUT);
+check("a captured stdout parses", capturedLast !== null);
+if (capturedLast !== null) {
+	// The last summary wins even though Blender printed two lines of banner
+	// and chatter after it -- the backwards scan, on real output.
+	eq("the captured run's last summary wins", capturedLast.importedFiles, ["cap.fbx"]);
+	eq("the captured run's armatures are empty, not missing", capturedLast.armatures, []);
+	eq("the captured run's flippedRoots survive", capturedLast.flippedRoots, []);
+	// \uXXXX decodes back to the real name, so a caller reading importedNames
+	// sees the name Unity used rather than an escape sequence.
+	eq("non-ASCII names decode back to the real characters", capturedLast.importedNames, ["ICO球.001"]);
+}
+
+// The FIRST summary in that same captured output, which is what a forward scan
+// would have returned -- the reason the scan runs backwards.
+const capturedFirst = (() => {
+	const lines = CAPTURED_OUTPUT.split("\n");
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = (lines[index] ?? "").trim();
+		if (!line.startsWith("{")) continue;
+		try {
+			const parsed = JSON.parse(line);
+			if (Array.isArray(parsed.importedNames)) return parsed;
+		} catch {
+			// Not our summary.
+		}
+	}
+	return null;
+})();
+check("a forward scan would have returned the WRONG summary", capturedFirst !== null);
+if (capturedFirst !== null && capturedLast !== null) {
+	check(
+		capturedFirst.vertexTotal !== capturedLast.vertexTotal,
+		`the captured output no longer distinguishes the two summaries (${capturedFirst.vertexTotal} vs ${capturedLast.vertexTotal}), so it no longer tests the backwards scan`,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// A CONTRACT FIXTURE, not a captured stdout.
+//
 // The exact shape import_fbx.py prints. The VALUES are modelled on a real
 // Chiffon avatar transfer -- the four FBX names are the files that transfer
 // staged, and the three armatures are the ones blender_scene_info then
-// measured (186/68/109 bones) -- but this is a reconstructed fixture, not a
-// captured stdout. What matters is that it carries every key the script emits,
-// so adding a key to the Python side is a key this fixture is expected to grow.
+// measured (186/68/109 bones) -- but this is a RECONSTRUCTION: it was written
+// from what the parser is supposed to accept, so it is a round trip of the
+// parser's own contract.
+//
+// CONSEQUENCE, stated plainly: this fixture CANNOT detect a change in Blender's
+// output format or in what the Python scripts print. If Blender renames a key,
+// or starts emitting a different shape, this fixture keeps passing, because it
+// only ever encodes the parser's own beliefs. That is precisely what CAPTURED_
+// OUTPUT above is for, and why both exist.
+//
+// What the reconstruction DOES buy, and the reason it stays: it carries every
+// key the script emits, so adding a key to the Python side is a key this
+// fixture is expected to grow -- which is the regression this whole file
+// exists for (importedFiles and armatures were printed by the script, declared
+// in the interface, and dropped by the parser's return literal).
 const REAL_OUTPUT = [
 	"Blender 5.2.0 LTS",
 	'{"importedNames": ["Armature", "Armature.001", "Armature.002", "Body", "ICO球"], "materialNames": ["Material.002", "Body", "Costume"], "collectionName": "Pi_Imported", "vertexTotal": 46993, "importedFiles": ["Chiffon_ver1.0.0.fbx", "PcHair.fbx", "Serenity_LC.fbx", "zig.fbx"], "armatures": ["Armature", "Armature.001", "Armature.002"], "flippedRoots": []}',
