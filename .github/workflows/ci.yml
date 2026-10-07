@@ -60,7 +60,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-manager-core
-          ref: master
+          # The core's lazy-tool gate ships in a PR, not master yet; this
+          # branch is the one the consumer PRs depend on. Rebase to master
+          # when the core PR merges.
+          ref: feat/lazy-tool-activation
           path: projects/pi-manager-core
           # github.token cannot read a PRIVATE repository, and every repository
           # in this org is PRIVATE. A PAT with read access to the org.
