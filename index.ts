@@ -300,13 +300,30 @@ const unityBlenderGuidance = [
 // ctx, and the `ctx.ui.notify` call in /unity-blender-exit failed to typecheck
 // because the invented command context had no `ui`. The dependency is already
 // in devDependencies, and pi-blender imports it the same way.
+/**
+ * The unity_blender_* family, registered inert and declared to the model only
+ * when this session shows it needs them: /unity-blender engage, or a first
+ * call. See pi-manager-core's lazy-tools for the mechanism.
+ */
+const LAZY_UNITY_BLENDER_TOOL_NAMES = [
+	"unity_blender_transfer",
+	"unity_blender_status",
+];
+
+const lazyTools = core.createLazyToolGate({
+	toolNames: LAZY_UNITY_BLENDER_TOOL_NAMES,
+	isEngaged: () => managerMode.isEngaged(),
+});
+
 export default function unityBlender(pi: ExtensionAPI) {
 	// The binder is opt-in, like pi-unity. Injecting transfer guidance on
 	// every turn of every session is noise in a conversation that may never
 	// mention Blender or Unity, and it competes for attention with whatever the
 	// user is actually doing. Mirrors pi-unity's engaged flag.
 	managerMode.install(pi);
+	lazyTools.install(pi);
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_blender_transfer",
 		label: "Unity / Blender transfer",
 		description:
@@ -493,6 +510,7 @@ export default function unityBlender(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_blender_status",
 		label: "Unity / Blender bridge status",
 		description:
@@ -616,7 +634,10 @@ export default function unityBlender(pi: ExtensionAPI) {
 		// No usage notice: a bare /unity-blender is meaningful here, not a
 		// mistake. It opens by asking for status, because a transfer cannot
 		// start before anyone knows which application is actually reachable.
-		onEngage: () => managerMode.markEngaged(),
+		onEngage: () => {
+			managerMode.markEngaged();
+			lazyTools.activate(pi);
+		},
 		engagedMessage: "Transfer engaged — this session is the manager of both applications.",
 		getArgumentCompletions: (argumentPrefix: string) =>
 			argumentPrefix.length > 0
@@ -663,6 +684,9 @@ export default function unityBlender(pi: ExtensionAPI) {
 	// reset().
 	pi.on("session_start", (event) => {
 		managerMode.reset(event?.reason);
+		// Same reset semantics as the gate: a reload keeps an activated
+		// family, a fresh session starts inert.
+		lazyTools.reset(event?.reason);
 	});
 
 	// Manager-role enforcement: the parent session plans, delegates, and reads
