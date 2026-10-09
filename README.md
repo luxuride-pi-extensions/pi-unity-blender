@@ -100,8 +100,11 @@ object with a source file travels as that file, and everything else is exported
 separately as OBJ. The result reports it (`usedBothRoutes`), and the
 consequences are per-object — some objects arrive with an armature and others
 cannot, because an OBJ never carries bones. The axis handling differs by route
-too: an FBX import needs no fix (FBX is Y-up like Unity), while an OBJ import
-gets a negative Y scale. See the skill for the full per-object consequences.
+too: an FBX import needs no fix (FBX is Y-up like Unity), while an OBJ import is
+mirrored on Y — baked into the mesh rather than left as a negative object scale,
+which Blender does not carry normals or winding through. `flippedRoots` names
+the objects that were mirrored. See the skill for the full per-object
+consequences.
 
 ---
 
@@ -131,6 +134,8 @@ format's opinion of what fit, not proof it looks right.
 Intermediate files live in `$XDG_CACHE_HOME/unity-blender/staging/<mkdtemp>`,
 never inside a project or a `.blend` directory, and every staging dir is
 appended to `.transfers.log`. A failed transfer leaves nothing in your work.
+Each new transfer prunes directories older than 24 h, ten at a time and oldest
+first, so the cache does not accumulate every transfer's FBX forever.
 
 Override with `PI_UNITY_BLENDER_STAGING_DIR`. Related: `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS`
 (default `10000`) sets how old a bridge heartbeat may be before a side counts as dead.
@@ -277,8 +282,11 @@ claiming an identity the layout cannot support.
 - **No `.blend` open means no transfer from that side.** The binder exports
   *through the live session*, so an unsaved document has no path to hand over.
 - **Axis flip on the way back.** Unity is Y-up, Blender Z-up, so the OBJ import
-  negates Y by default (`flipUpAxis: true`). Passing it through twice
-  inverts handedness — the result warns about this.
+  mirrors Y by default (`flipUpAxis: true`). The mirror is baked into the mesh,
+  so re-importing the same names flips each fresh import exactly once rather
+  than compounding — but the FBX route is never flipped at all, because FBX is
+  Y-up like Unity. A round trip restores the handedness once; `flippedRoots` and
+  the notes say which objects were actually flipped.
 - **No material verification.** Nothing in this extension opens a render to
   confirm the materials landed. That is a deliberate scope cut, not an
   oversight.

@@ -145,11 +145,19 @@ The consequences are per-object, and that is what the aggregate hides:
   `blender_scene_info` and others do not.
 - An FBX import needs no axis fix: FBX is Y-up like Unity, so Blender's
   importer lines the two up on its own and the transfer says it was imported
-  "at its authored orientation". An OBJ import is given a **negative Y scale**
-  instead. That asymmetry matters on a round trip: send the OBJ'd object back
-  and the importer restores the handedness, so it is restored once, not
-  doubled. If an object comes back mirrored or lying on its side, this
-  asymmetry is the first thing to check, not the exporter.
+  "at its authored orientation". An OBJ import is mirrored on the Y axis, and
+  that mirror is **baked into the mesh data** — vertices, vertex normals and
+  face winding all reversed, object scale left at 1. A live negative object
+  scale would have been wrong: Blender does not carry custom normals or face
+  winding through a mirroring transform, so the object would sit correctly and
+  shade inside-out, and a transfer that reported success. Baking also makes the
+  flip idempotent, because there is no scale left to multiply by −1 a second
+  time on a re-import. `flippedRoots` names the objects that were mirrored; an
+  empty list on an OBJ transfer means the flip did not happen, so check it
+  before trusting the result. On a round trip, send the OBJ'd object back and
+  the mirrored geometry is exported as authored — the handedness is restored
+  once, not doubled. If an object comes back mirrored or lying on its side,
+  this asymmetry is the first thing to check, not the exporter.
 
 Ambiguity is reported rather than resolved. A GameObject name shared by several
 objects cannot be exported by name — the OBJ exporter takes one object per name
@@ -197,9 +205,13 @@ result unreadable. Delete it, purge the orphaned data, and say that you did.
 - **A material rendering white.** A lilToon material in a built-in-pipeline
   project assigns, passes every property check, and renders pure white with no
   error. Check the render pipeline before suspecting the transfer.
-- **Vertex count zero in a result field.** The export summary carries
-  `vertexTotal`; a zero means the field was dropped, not that the mesh was
-  empty. Re-verify on the receiving side instead of trusting the report.
+- **Vertex count that is missing, or zero, in a result field.** Blender →
+  Unity returns `vertexTotal: null` when its summary line was missing or
+  malformed — **null, not zero**, because a zero reads as "the mesh was
+  empty" and the binder cannot make that claim about your model. A *genuinely*
+  empty selection still reports `0`, so the two are distinguishable: trust
+  `null` as "unknown" and `0` as "empty". If either is what you got, verify on
+  the receiving side instead of trusting the report.
 - **A count that matches but a rig that did not come across.** An FBX carries
   its bones; an OBJ never does. If the direction was OBJ, no armature is
   expected, and its absence is not a bug.
@@ -235,3 +247,6 @@ Intermediates (FBX, OBJ, MTL, textures) are staged in pi's cache directory,
 never inside a project or a `.blend`. A user who aborts a transfer must not
 find junk in `Assets/`. The staging path is in `unity_blender_status`; the
 `unity-blender` staging directory also keeps a `.transfers.log` of every run.
+Directories older than 24 h are pruned at the start of the next transfer, ten
+per transfer, oldest first — so the log is a history, not a promise that every
+run's files are still there.

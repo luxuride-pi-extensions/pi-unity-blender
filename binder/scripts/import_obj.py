@@ -15,8 +15,9 @@ import_scene.obj. Both are tried so the binder is not pinned to one version.
 import json
 import os
 
-# pi-lens-ignore: ast-grep:unresolved-import-python (bpy is provided by Blender's Python runtime)
+# pi-lens-ignore: ast-grep:unresolved-import-python (bpy and mathutils are provided by Blender's Python runtime)
 import bpy  # pyright: ignore[reportMissingImports]
+from mathutils import Matrix  # pyright: ignore[reportMissingImports]
 
 # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
 CONFIG = json.loads(r"""__PI_BINDER_CONFIG__""")
@@ -98,13 +99,53 @@ for obj in imported:
         owner.objects.unlink(obj)
     collection.objects.link(obj)
 
-# Unity uses a left-handed, Y-up space; the importer axes above handle the
-# handedness, but a negative Y scale on the whole batch reads more naturally in
-# Blender than mirroring every object.
+# Unity's space is left-handed and Y-up; Blender's is right-handed and Z-up.
+#
+# WHY THIS IS NOT obj.scale.y *= -1
+# ----------------------------------
+# A negative Y scale leaves a MIRRORING TRANSFORM on the object while its vertex
+# normals and its triangle winding still describe the un-mirrored geometry.
+# Blender does not carry custom normals through a mirror (the normals stay in
+# object space and keep pointing the way the OBJ authored them), and it does not
+# reverse face winding for a negative determinant either. So the object renders
+# inside-out / mis-shaded, and the result is wrong geometry that still looks
+# like a successful import -- exactly the failure this suite exists to catch.
+#
+# So the flip is BAKED INTO THE MESH DATA: mirror the vertices in mesh space,
+# then flip the vertex normals and the polygon winding to match, and leave
+# object scale at (1, 1, 1). No live negative scale remains for the next export
+# to compound.
+#
+# Accumulation across round trips: because nothing is left as a transform, a
+# re-import of the same-named object simply replaces the old object and this
+# runs once on the fresh geometry. Baking is what makes the flip idempotent --
+# there is no scale left to multiply by -1 a second time.
+#
+# EVERY mesh in the batch is flipped, not only the roots, because the flip now
+# lives in mesh data rather than in an inherited root scale. An OBJ carries no
+# transform rows, so Blender's importer leaves every imported object at identity
+# and parenting (use_split_groups nests groups under Empties) carries no
+# rotation or scale to compose against -- mirroring each mesh in its own space
+# is therefore the same mirror as mirroring the batch. The old root-only
+# `scale.y *= -1` could rely on inheritance to reach the children; baking
+# cannot.
+#
+# mesh.transform() mirrors the vertex positions but NOT the custom normal layer,
+# so flip_normals() is what reverses the stored normals, and Blender's own
+# "flip normals" also reverses polygon winding. Both are required: one fixes
+# shading, the other fixes which side is the outside.
+_FLIP_Y = Matrix.Diagonal((1.0, -1.0, 1.0, 1.0))
+flipped_roots = []
 if CONFIG.get("flipUpAxis", True):
     for obj in imported:
-        if obj.parent is None:
-            obj.scale.y *= -1
+        # MESH only: an ARMATURE or EMPTY has no mesh data to bake into, and
+        # touching .data on it would raise.
+        if obj.type != "MESH":
+            continue
+        obj.data.transform(_FLIP_Y)
+        obj.data.flip_normals()
+        obj.data.update()
+        flipped_roots.append(obj.name)
 
 for obj in imported:
     obj.select_set(True)
@@ -124,6 +165,10 @@ print(
             "materialNames": materials,
             "collectionName": collection.name,
             "vertexTotal": sum(len(obj.data.vertices) for obj in imported if obj.type == "MESH"),
+            # Same shape and name import_fbx.py already reports, so one caller
+            # reads both routes the same way: a caller can tell "nothing was
+            # flipped" from "the flip never happened".
+            "flippedRoots": flipped_roots,
         }
     )
 )

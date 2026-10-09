@@ -2,7 +2,34 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    # Every branch `git branch -a` currently shows, and no others. This list
+    # was [master] alone, which meant nothing ran for the branch all four
+    # repos were actually developed on: `feat/packaging` sat fully pushed
+    # and no CI run had ever existed for its head. Do NOT "tidy" this back
+    # to [master] -- that is the exact shape of the finding.
+    #
+    #   master
+    #     the release branch; its run is the pre-merge gate.
+    #   feat/packaging
+    #     the packaging lane, in flight across all four repos (the `files`
+    #     lists and release.yml).
+    #   fix/ci-checkout-order
+    #     the lane that established this repo's checkout order, which is
+    #     load-bearing -- see the checkout comment in the `agreement` job.
+    #   fix/review-findings
+    #     the review-findings lane this fix belongs to.
+    #   ci/github-actions
+    #     the lane that stands up the GitHub Actions workflow itself, so
+    #     its changes need a runner to judge.
+    #
+    # When a lane is added, add it here. The check is one command:
+    #   git branch -a --format='%(refname:short)' | grep -v HEAD
+    branches:
+      - master
+      - feat/packaging
+      - fix/ci-checkout-order
+      - fix/review-findings
+      - ci/github-actions
   pull_request:
   workflow_dispatch:
 
@@ -10,31 +37,128 @@ permissions:
   contents: read
 
 jobs:
-  # There is no token-free job in this repository, which is a property of the
-  # suite rather than an omission.
+  # The only job here used to be
+  #     if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
+  # `vars` is a repository VARIABLE, not a secret. It happens to be set to '1'
+  # here today, and nothing in the repository says so -- no workflow, script or
+  # doc sets or reads it, and `gh api .../actions/variables` is the only place
+  # the value exists. Unset it, or clone this file to a repo that never had it,
+  # and every run of this workflow reports SUCCESS having executed zero jobs:
+  # the most dangerous failure mode in the suite, because a green tick on a
+  # check that never ran is indistinguishable from a green tick on a check
+  # that passed.
   #
-  # test/manager-prompt.mjs is in `npm test`, and it cannot pass without the
-  # other two extensions installed. It composes this repo's manager prompt out
-  # of pi-blender's and pi-unity's, then asserts the two halves agree on the
-  # Blender-side contract -- who briefs whom, and what a stop condition is.
-  # With the extensions absent it reports 11 passed and 4 FAILED: both side
-  # bodies missing, and a load-failure notice the run is not supposed to emit.
-  # So this job cannot be token-free without taking manager-prompt.mjs out of
-  # `npm test`, and splitting the suite so a "unit" job could report 30 passing
-  # while the agreement check sat in a skipped job would leave the contract
-  # untested on every pull request.
+  # Nor was the gate a reason to gate. A job-level `if` cannot read `secrets`
+  # at all (only github/needs/vars/inputs are in scope), so the real condition
+  # -- "does this runner have CONSUMER_TOKEN" -- is not expressible as a job
+  # `if`, and expressing a proxy for it as a VARIABLE is what put the whole
+  # suite behind something nobody could see from the file. A condition a step
+  # can read is a condition a step can enforce.
   #
-  # Gated on a repository VARIABLE rather than `secrets`: `secrets` is not in
-  # scope for a job-level `if` (only github/needs/vars/inputs are), and writing
-  # `if: ${{ secrets.CONSUMER_TOKEN != '' }}` fails the whole workflow file with
-  # no jobs at all. A variable also expresses the real condition -- "this repo
-  # can read its siblings" -- which is a property of the configuration, not of
-  # whether a particular PAT happens to be populated today.
-  test:
-    name: unit tests, typecheck, and manager-prompt agreement
-    if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
+  # Neither job is gated now, and between them they cover every check that
+  # used to live behind the variable:
+  #
+  #   unit        runs always, with no PAT. `tsc --noEmit` reads this repo's
+  #               own sources and needs nothing else. It is the one check in
+  #               this repository that a bare checkout can actually complete,
+  #               and that is not a guess: every .ts module here loads
+  #               manager-core.ts, which THROWS when the core is not installed
+  #               (manager-core.ts:257-264, by design -- a silent fallback is
+  #               the drift pi-manager-core exists to prevent), so with no
+  #               sibling present even test/parse-summary.mjs dies on import.
+  #   agreement   runs always, and fails on its FIRST step when
+  #               CONSUMER_TOKEN is missing. It needs the token because
+  #               test/manager-prompt.mjs composes this repo's manager prompt
+  #               out of pi-blender's and pi-unity's and asserts the halves
+  #               agree on the Blender-side contract; without the extensions
+  #               installed it reports 11 passed and 4 FAILED (both side
+  #               bodies missing, plus a load-failure notice the run is not
+  #               supposed to emit).
+  #
+  # The guard is a STEP rather than a job `if` on purpose. A job-level `if`
+  # turns missing setup into a SKIPPED job, which renders as green; a failing
+  # first step turns the same missing setup into a FAILED job naming the
+  # secret it wanted. So the possible outcomes are: the checks run and pass,
+  # the checks run and fail, or the run is red saying which secret is
+  # missing. There is no fourth outcome in which the workflow is green and
+  # nothing was verified.
+
+  unit:
+    name: typecheck
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # --legacy-peer-deps: peerDependencies { "pi-manager-core": "*" } is
+      # the documented shape for a Pi package (docs/packages.md) and is
+      # loaded from the extensions directory, never from the registry, so a
+      # plain `npm ci` 404s on a package that was never published.
+      #
+      # The install is not optional here either, and the failure it prevents
+      # does not read like a missing install: `tsc --noEmit` reads
+      # compilerOptions.types: ["node"] against node_modules/@types, so with
+      # no node_modules at all it reports
+      #
+      #   error TS2688: Cannot find type definition file for 'node'.
+      #   The file is in the program because:
+      #     Entry point of type library 'node' specified in compilerOptions
+      #
+      # which points at tsconfig rather than at the install that was skipped.
+      - name: install
+        run: npm ci --legacy-peer-deps
+
+      # This job deliberately does NOT try to run the test suites. See the
+      # note above about loadManagerCore() throwing on import: on a runner
+      # with no pi-manager-core checkout, every suite in test/ fails before
+      # its first assertion, which is a red run that says "install the
+      # core" rather than anything about this repository. The suites run in
+      # `agreement`, where the core is present.
+      - name: typecheck
+        run: npm run typecheck
+
+  agreement:
+    name: manager-prompt cross-repo agreement
+    runs-on: ubuntu-latest
+    steps:
+      # FIRST, and before anything else, so a run with no PAT is a short
+      # failure naming the secret rather than a checkout error 90 lines into
+      # the log. This step replaces what the job-level `if` used to do.
+      - name: the sibling checkouts need CONSUMER_TOKEN
+        env:
+          # Passed through the environment, never interpolated into the
+          # shell body: a PAT in a `run:` line is a PAT in the log.
+          CONSUMER_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `:-` rather than plain $CONSUMER_TOKEN because `set -u` treats a
+          # secret that was never created as an error, and the error a user
+          # should read is the paragraph below, not "unbound variable".
+          if [ -z "${CONSUMER_TOKEN:-}" ]; then
+            {
+              echo "CONSUMER_TOKEN is not set, so pi-blender and pi-unity"
+              echo "cannot be checked out and the cross-repo check cannot"
+              echo "run. test/manager-prompt.mjs asserts that this"
+              echo "repository's manager prompt and pi-blender's agree on"
+              echo "who briefs whom and what a stop condition is; with a"
+              echo "side extension absent it reports 11 passed and 4 FAILED,"
+              echo "and there is no way to run it without the siblings."
+              echo
+              echo "This step FAILS rather than skipping the job, because a"
+              echo "skipped job renders as a green tick."
+              echo
+              echo "To fix: add CONSUMER_TOKEN as a repository secret -- a"
+              echo "PAT with read access to this org. github.token cannot"
+              echo "read a PRIVATE repository, and every repository in this"
+              echo "org is PRIVATE."
+            } >&2
+            exit 1
+          fi
+
       # This repository lands in a subdirectory, so $GITHUB_WORKSPACE is itself
       # a projects/ directory holding all four checkouts.
       # THIS REPOSITORY FIRST, ON PURPOSE, AND NOT BY ACCIDENT.
@@ -137,10 +261,11 @@ jobs:
         run: |
           agent="$RUNNER_TEMP/agent-dir/extensions"
           mkdir -p "$agent"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-unity"          "$agent/pi-unity"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"        "$agent/pi-blender"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core"   "$agent/manager-core"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender"  "$agent/unity-blender"
+          w="$GITHUB_WORKSPACE/projects"
+          ln -s "$w/pi-unity"         "$agent/pi-unity"
+          ln -s "$w/pi-blender"       "$agent/pi-blender"
+          ln -s "$w/pi-manager-core"  "$agent/manager-core"
+          ln -s "$w/pi-unity-blender" "$agent/unity-blender"
 
       - name: typecheck and test
         env:

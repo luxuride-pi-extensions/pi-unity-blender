@@ -15,12 +15,14 @@
  * once here and used for both.
  */
 
+import type { Dirent } from "node:fs";
 import {
 	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	openSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
@@ -254,9 +256,104 @@ async function runLocked<T>(
 	);
 }
 
-/** A fresh per-transfer staging folder under the cache. */
+/**
+ * How long a staging directory must sit untouched before it is a prune target.
+ *
+ * 24 h, and deliberately generous: a staged FBX is a user's asset copy, and
+ * the only reason to remove it is that it is never removed otherwise. A day is
+ * far longer than any transfer takes (the slow path is a 300 s bridge
+ * timeout), so nothing a user might still be importing by hand gets deleted,
+ * while a busy machine still prunes rather than growing without bound.
+ */
+export const STAGING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Cap on how many directories one prune may remove.
+ *
+ * The age test alone cannot bound a single call: a cache that filled up while
+ * the feature was missing has thousands of old directories, and removing them
+ * all in one synchronous pass is a multi-second stall in the middle of starting
+ * a transfer. The cap spreads that over many transfers. It also keeps a
+ * concurrent transfer's directory safe, because a directory younger than
+ * STAGING_MAX_AGE_MS is never a candidate whatever the count.
+ */
+export const STAGING_PRUNE_MAX_DIRS = 10;
+
+/**
+ * A fresh per-transfer staging folder under the cache.
+ *
+ * Prunes first. Nothing else ever removed these directories: createStagingDir
+ * appends to .transfers.log and returns, so every transfer left its FBX (plus a
+ * textures/ dir for the Blender -> Unity leg) in the cache forever, and the log
+ * was written and never read. A cache directory that only grows is a slow disk
+ * leak of copies of a user's assets.
+ *
+ * Pruning is best-effort and NEVER fails the transfer. A permission error or a
+ * race with another process's directory is reported on stderr and ignored: the
+ * caller's actual job is the transfer, and refusing to start because the
+ * housekeeping could not run would be a worse outcome than a stale directory.
+ */
 export function createStagingDir(prefix: string, baseDir: string): string {
 	const dir = mkdtempSync(join(baseDir, `${prefix}-`));
+	pruneStagingDirs(baseDir);
 	appendFileSync(join(baseDir, ".transfers.log"), `${new Date().toISOString()} ${dir}\n`);
 	return dir;
+}
+
+/**
+ * Remove staging directories that are both old enough and (past the cap) the
+ * oldest of the candidates.
+ *
+ * Both conditions matter, and neither alone is safe:
+ *   - age alone cannot bound the work done in one call;
+ *   - count alone would delete a directory a transfer just created.
+ * A directory is removed only when it is older than STAGING_MAX_AGE_MS AND the
+ * number of candidates still within the cap has not been reached, so a
+ * concurrent transfer's own directory is never a candidate at all.
+ *
+ * Sorted by modification time, oldest first, so the cap removes the genuinely
+ * oldest rather than whatever readdirSync happened to return.
+ */
+export function pruneStagingDirs(baseDir: string, now: number = Date.now()): string[] {
+	/** Anything readdirSync cannot see is simply nothing to prune. */
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(baseDir, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+
+	const candidates: { path: string; mtimeMs: number }[] = [];
+	for (const entry of entries) {
+		// isDirectory() first: a symlink to a directory reports isSymbolicLink(),
+		// and following one would delete something outside the cache. The staging
+		// dirs are always real mkdtemp directories, so requiring a real one
+		// costs nothing and removes the whole class of accident.
+		if (!entry.isDirectory()) continue;
+		const path = join(baseDir, entry.name);
+		let mtimeMs: number;
+		try {
+			mtimeMs = statSync(path).mtimeMs;
+		} catch {
+			// Vanished between readdir and stat -- another process's cleanup.
+			continue;
+		}
+		if (now - mtimeMs > STAGING_MAX_AGE_MS) candidates.push({ path, mtimeMs });
+	}
+	candidates.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+	const removed: string[] = [];
+	for (const candidate of candidates.slice(0, STAGING_PRUNE_MAX_DIRS)) {
+		try {
+			rmSync(candidate.path, { recursive: true, force: true });
+			removed.push(candidate.path);
+		} catch (error) {
+			process.stderr.write(
+				`binder: could not remove stale staging directory ${candidate.path}: ${
+					error instanceof Error ? error.message : String(error)
+				}\n`,
+			);
+		}
+	}
+	return removed;
 }

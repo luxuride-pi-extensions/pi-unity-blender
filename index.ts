@@ -379,8 +379,11 @@ export default function unityBlender(pi: ExtensionAPI) {
 			flipUpAxis: Type.Optional(
 				Type.Boolean({
 					description:
-						"unity-to-blender only: apply a negative Y scale on import so Unity's Y-up geometry sits " +
-						"sensibly in Blender's Z-up space. Defaults to true.",
+						"unity-to-blender only: mirror the Y axis on import, so Unity's Y-up geometry sits " +
+						"sensibly in Blender's Z-up space. Baked into the mesh (vertices, normals and winding " +
+						"together) rather than left as a negative object scale, which Blender does not carry " +
+						"normals or winding through. Does NOT apply to source model files: FBX is Y-up like " +
+						"Unity and needs no flip. Defaults to true.",
 				}),
 			),
 			preferSourceModels: Type.Optional(
