@@ -7,16 +7,21 @@ MIT.
 
 ---
 
-## What it needs
+## Tools
 
-Both applications open, with their pi bridges loaded. That means:
+The binder registers two tools; detail, transfer mechanics and the failure
+modes live in [docs/DESIGN.md](docs/DESIGN.md).
 
-- `pi-blender` installed and the `.blend` open in Blender
-- `pi-unity-vrchat` installed and a project open in Unity
+| Tool | What it does |
+|---|---|
+| `unity_blender_status` | report both bridges: alive/busy/locked on each side |
+| `unity_blender_transfer` | move geometry/materials between live Blender and Unity (one direction per call) |
 
-Neither is a dependency of this extension. Call `unity_blender_status` first —
-it reports every unmet precondition at once, so you learn about the missing
-Editor *now* rather than after a two-minute cold start.
+The `/unity-blender` command engages the cross-application manager
+(`unity-blender-manager`), which routes to per-side skills and to
+`unity_blender_transfer`.
+
+---
 
 ## Install
 
@@ -68,236 +73,6 @@ the manager never authors or eyeballs anything.
 The `unity-blender-transfer` skill ships in `skills/` and is published through a
 `resources_discover` hook added to `index.ts`. Without that hook the directory
 is invisible to pi: the skill would exist on disk and never load.
-
-## Usage
-
-```
-/unity-blender move the selected meshes from Blender into Assets/Art
-```
-
-or drive the tools directly:
-
-- `unity_blender_transfer` — do the transfer
-- `unity_blender_status` — who is alive, who is locked, what is missing
-
----
-
-## Why it doesn't import the other extensions
-
-The only thing Blender and Unity have in common here is the bridge wire
-protocol: a request JSON appears in a directory, the application writes a
-response JSON back. So `binder/bridge.ts` speaks that protocol directly and is
-the single client for **both** bridges.
-
-Importing `pi-unity-vrchat`'s and `pi-blender`'s internals would couple this
-extension to their request shapes, their environment variables, and their
-install layout — each of which can change or be removed independently. The
-coupling buys nothing; the protocol is the contract.
-
-## Why the format is asymmetric
-
-This follows from the applications, not from preference:
-
-| Direction | Format | Why |
-| --- | --- | --- |
-| Blender → Unity | **FBX** | Both apps read FBX; Blender *writes* it natively and Unity imports it well. Textures are **embedded** (`embed_textures=True`) because Unity's importer cannot resolve Blender-relative texture paths. Armatures are exported (`object_types` includes `ARMATURE`) so a rig crosses with its mesh — without that the exporter writes the bones nowhere and the file reimports with no rig at all. Curves, surfaces and fonts are exported as temporary **mesh copies**, so the geometry crosses while your scene keeps its curve objects. |
-| Unity → Blender | **The source model file**, falling back to OBJ + MTL | A file carries the rig, the material assignment and the animation; a re-export flattens all of that away. `preferSourceModels` is on by default, and OBJ is the fallback for objects with no file behind them — Unity has **no built-in mesh exporter at all**, so the bridge writes OBJ by hand (`ExportObj` in `PiUnityBridge.cs`). |
-
-So a single Unity → Blender call often takes **both** routes at once: every
-object with a source file travels as that file, and everything else is exported
-separately as OBJ. The result reports it (`usedBothRoutes`), and the
-consequences are per-object — some objects arrive with an armature and others
-cannot, because an OBJ never carries bones. The axis handling differs by route
-too: an FBX import needs no fix (FBX is Y-up like Unity), while an OBJ import is
-mirrored on Y — baked into the mesh rather than left as a negative object scale,
-which Blender does not carry normals or winding through. `flippedRoots` names
-the objects that were mirrored. See the skill for the full per-object
-consequences.
-
----
-
-## What actually survives the trip
-
-**Crosses:** mesh geometry, UVs, material slots, base texture images, object
-naming and hierarchy.
-
-**Flattened:** material *graphs*. Blender's node trees and Unity's shader graphs
-become the property set the exchange format can carry — base colour, metallic,
-roughness, emission. Layered, procedural, or custom-node setups lose their
-structure.
-
-**Does not cross:** lights, cameras, physics, scripts, scenes. Animation
-*clips* travel as the rig's own f-curves on an exported armature; a scene-level
-action attached to something other than a bone does not. Blender 3.x is the one
-version where an OBJ import cannot recover Unity's GameObject names (its OBJ
-importer has no equivalent of 4.x's `use_split_groups`), so they fall back to
-the file name there.
-
-Always verify materials on the receiving side. `unity_blender_transfer` returns a
-`notes` array saying so in as many words; the counts in the result are the
-format's opinion of what fit, not proof it looks right.
-
-## Staging
-
-Intermediate files live in `$XDG_CACHE_HOME/unity-blender/staging/<mkdtemp>`,
-never inside a project or a `.blend` directory, and every staging dir is
-appended to `.transfers.log`. A failed transfer leaves nothing in your work.
-Each new transfer prunes directories older than 24 h, ten at a time and oldest
-first, so the cache does not accumulate every transfer's FBX forever.
-
-Override with `PI_UNITY_BLENDER_STAGING_DIR`. Related: `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS`
-(default `10000`) sets how old a bridge heartbeat may be before a side counts as dead.
-
-## The Blender script gets its config interpolated
-
-The Blender bridge's `execute-python` request has **no custom-argument
-channel** — it passes only `OUTPUT_BLEND_PATH`, `WORKSPACE_PATH`, and
-`ITERATION_PATH` as globals, then execs the file at `userScriptPath`. So the
-transfer's settings are written *into* the staged script as a JSON literal
-replacing a `__PI_BINDER_CONFIG__` placeholder, and the script is read from disk
-fresh each run. JSON is valid Python for every value passed here, and it escapes
-names correctly — which matters, because object and texture names come from the
-user's scene.
-
-`binder/scripts/export_fbx.py` and `binder/scripts/import_obj.py` are therefore
-real, lintable `.py` files rather than template strings.
-
-## Editor detection
-
-Neither editor is on `PATH` on this machine, which is the normal case and the
-reason a bare `commandExists("blender")` probe is not used. Each editor is
-located the same way its own extension locates it for launching:
-
-| Editor | Routes probed, in order |
-| --- | --- |
-| Blender | `$BLENDER_PATH` → macOS app bundle → `flatpak info --show-ref org.blender.Blender` → `PATH` |
-| Unity | `$UNITY_PATH` → macOS Hub → `$UNITY_HUB_PATH/Editor/<version>/Editor/Unity`, newest first → `PATH` |
-
-`unity_blender_status` reports which route matched, so a "found" you did not
-expect is explainable. A **not found** result is informational only: both legs
-run inside an already-open application, so a detected binary matters just for
-headless or CLI use. Detection never launches anything.
-
-## Development
-
-```bash
-./node_modules/typescript/bin/tsc --noEmit   # NOT `npx tsc` — it is a false pass
-```
-
-`npx tsc` downloads a decoy `tsc@2.0.4` and reports success without checking
-anything. Always use the local binary from `node_modules`.
-
-The tsconfig covers `test/` and `scripts/` as well as the extension itself, and
-turns on `noUnusedLocals` / `noUnusedParameters`. Both were decided by what went
-wrong: `config.ts` shipped an unused import that only the strict flags report,
-and the suites are executable Node that would otherwise break silently on a
-renamed export. `checkJs` is deliberately off — the `.mjs` test files are plain
-scripts whose types come from the modules they import.
-
-The two gates that guard this repo from the outside live in **pi-manager-core**,
-not here, and both read the working tree: `test/allowlists.mjs` and
-`test/agent-rosters.mjs` load the extension, so the `agentRoster` Set and the
-prompt's `allowedAgents:` line are compared against each other, and
-`test/doc-consistency.mjs` checks the README. Run them from that repo.
-
-```bash
-npm test              # everything, including the Blender-backed suite (~60s)
-npm run test:unit     # the fast suites only: no Blender process is launched
-npm run test:scripts  # just the three Python scripts
-```
-
-`test/binder-scripts.test.mjs` runs the real `binder/scripts/*.py` in a headless
-Blender, because every claim those scripts make is about how a Blender operator
-reacts to a keyword set on a given build — a mock would encode the answer and
-pass whatever the script did. It skips with the paths it searched when no
-Blender is found, so a green run is never mistaken for a passing one. Two
-details it exists to hold: scratch files go under `~/.cache`, never `tmpdir`,
-because a flatpak Blender cannot see the host's `/tmp`; and a fixture scene and
-the export run in the **same** Blender process, because the export operates on
-the scene that is open and a separate process would export an empty one.
-
-Host paths are resolved rather than hardcoded, so this repo works on another
-machine. Every variable the code reads, in the order it matters:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BLENDER_PATH` | auto | Blender binary. Probed first when detecting the editor. |
-| `UNITY_PATH` | auto | Unity Editor binary. **Whitespace-split into argv.** |
-| `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root, searched newest-version-first. |
-| `PI_BLENDER_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-blender/bridge` | Blender request/response queue. |
-| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity-vrchat/bridge` | Unity request/response queue. |
-| `PI_UNITY_BLENDER_STAGING_DIR` | `$XDG_CACHE_HOME/unity-blender/staging` | Transfer staging. **Keep this in the cache** — the Blender flatpak sandbox cannot read `/tmp`. |
-| `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS` | `10000` | How old a bridge heartbeat may be before the bridge counts as dead. |
-| `PI_TODO_ENTRY` | `$PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts` | Install-time only. The one agent installed here names `todo` in its `tools:`, so a child gets a `todo` it can never call if the package is not in that npm tree. |
-
-Both bridge directories can point at the same place, but they are independent
-queues: the binder talks to whichever editor is open and reports the other as
-dead. That is a correct report, not a bug.
-
-## One Blender per session, owned by the root session
-
-Every process in a session's delegation tree — the manager, its workers, the
-critics — talks to the **same** Blender, and the root pi process owns it. Three
-things hold that together, and none of them is the manager behaving itself:
-
-1. **The instance id is inherited, never minted per process.** `config.ts`
-   resolves `PI_BLENDER_INSTANCE_ID` at *module load* and publishes it into
-   `process.env`. pi-subagents runs children in-process, so a subagent
-   re-publishes the value it just inherited. Publishing lazily on first use
-   would leave a subagent spawned early in the session free to mint its own id,
-   and therefore its own window.
-2. **The launch is claimed across processes.**
-   `pi-blender/launch.ts` `tryClaimLaunch()` creates `<bridgeDir>/launch.claim`
-   with `wx` — the create *is* the lock. `bridgeLaunchStarted` is per-process
-   module state and starts `false` in every child, so without that claim a
-   manager and its three workers would each launch a window on their first
-   `blender_*` call.
-3. **The binder publishes too.** Before this, the binder only *read* the id, so
-   a process that loaded it before pi-blender resolved the bridge ROOT
-   instead of the instance dir and reported the bridge dead while Blender was up
-   one level down. Load order alone could cause it.
-
-`unity_blender_status` reports the owner as `blenderInstance`:
-
-```json
-"blenderInstance": {
-  "instanceId": "35bea7dda255", "rootInstanceId": "35bea7dda255",
-  "isRoot": true, "bridgeDir": ".../bridge/35bea7dda255", "pinned": false
-}
-```
-
-`isRoot: false` is normal in a subagent and is not a problem. The field that
-matters is `instanceId !== rootInstanceId`, which means this process is
-addressing a *different* Blender than the session's owner — the one case where a
-second window is a real defect, and previously the only way to notice was to
-compare directory paths by eye.
-
-Setting `PI_BLENDER_BRIDGE_DIR` by hand switches the whole scheme off
-(`pinned: true`): no per-instance subdir, so ownership is a property of the
-directory rather than the process, and `isRoot` is reported `false` rather than
-claiming an identity the layout cannot support.
-
-## Known limits
-
-- **Neither leg has been run end-to-end against live applications.** Both
-  editors are present on this machine (Blender as the `org.blender.Blender`
-  5.2 flatpak, Unity 2022.3.22f1 in the Hub), but both must be *open with their
-  bridge loaded* for a real test, and that has not been done. The Blender →
-  Unity leg is the more likely of the two to need adjustment, since it is the
-  one whose export has never executed.
-- **A dirty `.blend` exports from disk.** Only what is saved crosses; the
-  result says so in `notes` rather than silently exporting stale geometry.
-- **No `.blend` open means no transfer from that side.** The binder exports
-  *through the live session*, so an unsaved document has no path to hand over.
-- **Axis flip on the way back.** Unity is Y-up, Blender Z-up, so the OBJ import
-  mirrors Y by default (`flipUpAxis: true`). The mirror is baked into the mesh,
-  so re-importing the same names flips each fresh import exactly once rather
-  than compounding — but the FBX route is never flipped at all, because FBX is
-  Y-up like Unity. A round trip restores the handedness once; `flippedRoots` and
-  the notes say which objects were actually flipped.
-- **No material verification.** Nothing in this extension opens a render to
-  confirm the materials landed. That is a deliberate scope cut, not an
-  oversight.
 
 ## Releases
 
