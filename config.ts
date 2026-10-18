@@ -2,7 +2,7 @@
  * Path resolution for the unity-blender binder.
  *
  * The binder is a *separate* extension on purpose: it must be installable
- * without either pi-blender or pi-unity's TypeScript internals, and
+ * without either pi-blender or pi-unity-vrchat's TypeScript internals, and
  * it must keep working if either is moved or upgraded. So it resolves both
  * bridge directories from environment variables the same way those extensions
  * publish them, and talks to both queues with its own small client.
@@ -86,7 +86,7 @@ const SIDE_MANAGER_PROMPTS = [
 		// brief cheap to act on.
 		extra: join("blender", "agents", "exchange.md"),
 	},
-	{ label: "Unity side", extension: "pi-unity", primary: join("unity", "agents", "unity-manager.md"), extra: null },
+	{ label: "Unity side", extension: "pi-unity-vrchat", primary: join("unity", "agents", "unity-manager.md"), extra: null },
 ] as const;
 
 /**
@@ -295,10 +295,10 @@ export function getBlenderBridgeDir(): string {
 	return join(getBlenderBridgeRootDir(), instanceId);
 }
 
-/** Matches pi-unity's ENV_UNITY_BRIDGE_DIR. */
+/** Matches pi-unity-vrchat's ENV_UNITY_BRIDGE_DIR. */
 export function getUnityBridgeDir(): string {
 	return expandUserPath(
-		process.env.PI_UNITY_BRIDGE_DIR?.trim() || join(xdgCacheHome(), "pi-unity", "bridge"),
+		process.env.PI_UNITY_BRIDGE_DIR?.trim() || join(xdgCacheHome(), "pi-unity-vrchat", "bridge"),
 	);
 }
 

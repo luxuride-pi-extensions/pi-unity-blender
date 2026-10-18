@@ -1,7 +1,7 @@
 /**
  * Host paths the test harness needs, resolved instead of hardcoded.
  *
- * Deliberately mirrors pi-unity/test/paths.mjs rather than importing it:
+ * Deliberately mirrors pi-unity-vrchat/test/paths.mjs rather than importing it:
  * the two extensions are separate git repos, and one repo's test must not
  * depend on a sibling checkout existing.
  *

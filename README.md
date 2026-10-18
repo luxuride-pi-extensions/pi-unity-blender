@@ -12,7 +12,7 @@ MIT.
 Both applications open, with their pi bridges loaded. That means:
 
 - `pi-blender` installed and the `.blend` open in Blender
-- `pi-unity` installed and a project open in Unity
+- `pi-unity-vrchat` installed and a project open in Unity
 
 Neither is a dependency of this extension. Call `unity_blender_status` first —
 it reports every unmet precondition at once, so you learn about the missing
@@ -20,13 +20,21 @@ Editor *now* rather than after a two-minute cold start.
 
 ## Install
 
+The released package installs with pi itself:
+
+```bash
+pi install npm:@luxuride-pi/unity-blender
+```
+
+For development from a clone (symlink install):
+
 ```bash
 ln -sfn "$PWD" ~/.pi/agent/extensions/unity-blender
 ```
 
 Same two caveats as the other extensions: `node_modules/typebox` symlinks into
 pi's own install, and agent templates must be installed from the **binder's**
-repo — not pi-unity's installer, which would race over the same file.
+repo — not pi-unity-vrchat's installer, which would race over the same file.
 
 ```bash
 node scripts/install-agents.mjs            # dry run: print resolved paths
@@ -81,7 +89,7 @@ protocol: a request JSON appears in a directory, the application writes a
 response JSON back. So `binder/bridge.ts` speaks that protocol directly and is
 the single client for **both** bridges.
 
-Importing `pi-unity`'s and `pi-blender`'s internals would couple this
+Importing `pi-unity-vrchat`'s and `pi-blender`'s internals would couple this
 extension to their request shapes, their environment variables, and their
 install layout — each of which can change or be removed independently. The
 coupling buys nothing; the protocol is the contract.
@@ -217,7 +225,7 @@ machine. Every variable the code reads, in the order it matters:
 | `UNITY_PATH` | auto | Unity Editor binary. **Whitespace-split into argv.** |
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root, searched newest-version-first. |
 | `PI_BLENDER_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-blender/bridge` | Blender request/response queue. |
-| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Unity request/response queue. |
+| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity-vrchat/bridge` | Unity request/response queue. |
 | `PI_UNITY_BLENDER_STAGING_DIR` | `$XDG_CACHE_HOME/unity-blender/staging` | Transfer staging. **Keep this in the cache** — the Blender flatpak sandbox cannot read `/tmp`. |
 | `PI_UNITY_BLENDER_HEARTBEAT_STALE_MS` | `10000` | How old a bridge heartbeat may be before the bridge counts as dead. |
 | `PI_TODO_ENTRY` | `$PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts` | Install-time only. The one agent installed here names `todo` in its `tools:`, so a child gets a `todo` it can never call if the package is not in that npm tree. |
@@ -293,20 +301,21 @@ claiming an identity the layout cannot support.
 
 ## Releases
 
-Every release is a **git tag**, not a published npm package. All four packages
-in this organization are `"private": true`, so `npm publish` refuses them, and
-unsetting that flag to get a publish through would trade a correct manifest for
-a working script.
+Every release is both a **git tag** and an npm package. The package publishes
+as `@luxuride-pi/unity-blender` from the release workflow via npm trusted publishing (OIDC from
+GitHub Actions — no publish token exists anywhere).
 
-pi installs this extension from the **clone**, not from a tarball: `installGit()`
-runs `git clone`, an optional `git checkout <ref>`, then
+pi can also install this extension from the **clone**: `installGit()` runs
+`git clone`, an optional `git checkout <ref>`, then
 `npm install --legacy-peer-deps` inside it, and pi loads the extension's
-TypeScript straight from source through jiti. So a tag *is* the artifact — there
-is no build step and nothing to compile.
+TypeScript straight from source through jiti. So a tag *is* the artifact for a
+git install — there is no build step and nothing to compile.
 
 ### Install a release
 
 ```bash
+pi install npm:@luxuride-pi/unity-blender@^<version>
+# or, from the clone:
 pi install git:github.com/luxuride-pi-extensions/pi-unity-blender@v<version>
 ```
 

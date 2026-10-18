@@ -2,7 +2,7 @@
  * A minimal client for *both* live bridges.
  *
  * The binder deliberately reimplements the file-queue protocol instead of
- * importing pi-blender / pi-unity internals:
+ * importing pi-blender / pi-unity-vrchat internals:
  *   - the two bridges use different request/response shapes and different
  *     environment variables, so one shared queue client is all they have in
  *     common anyway;

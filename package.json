@@ -1,8 +1,7 @@
 {
-	"name": "pi-unity-blender",
+	"name": "@luxuride-pi/unity-blender",
 	"version": "0.1.0",
 	"description": "pi extension: /unity-blender binder that moves meshes and materials between a live Blender session and a live Unity project",
-	"private": true,
 	"type": "module",
 	"license": "MIT",
 	"files": [
@@ -29,6 +28,9 @@
 		"typescript": "^5.6.0"
 	},
 	"peerDependencies": {
-		"pi-manager-core": "*"
-	}
+		"@luxuride-pi/manager-core": "*"
+	},
+	"keywords": [
+		"pi-package"
+	]
 }

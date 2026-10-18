@@ -81,7 +81,7 @@ function resolveInstalledExtensionDir(name) {
 // leaves the child holding a verification tool that no extension provides.
 const extensionDirs = [
 	resolveInstalledExtensionDir("unity-blender"),
-	resolveInstalledExtensionDir("pi-unity"),
+	resolveInstalledExtensionDir("pi-unity-vrchat"),
 	resolveInstalledExtensionDir("pi-blender"),
 ]
 	// Drop a path that does not exist, but only if at least one does -- an

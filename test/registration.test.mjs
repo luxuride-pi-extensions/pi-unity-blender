@@ -276,7 +276,7 @@ process.stdout.write("RESULT:" + JSON.stringify(await (async () => (${body}))())
 				`({ unity: c.getUnityBridgeDir(), staging: c.getStagingDir() })`,
 			),
 			{
-				unity: join(WORK, "pi-unity", "bridge"),
+				unity: join(WORK, "pi-unity-vrchat", "bridge"),
 				// The Blender flatpak sandbox cannot read the host's /tmp, which is
 				// why staging is cache-only -- so the default has to be the cache.
 				staging: join(WORK, "staging-probe"),

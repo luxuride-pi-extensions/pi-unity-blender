@@ -69,7 +69,7 @@ jobs:
   #   agreement   runs always, and fails on its FIRST step when
   #               CONSUMER_TOKEN is missing. It needs the token because
   #               test/manager-prompt.mjs composes this repo's manager prompt
-  #               out of pi-blender's and pi-unity's and asserts the halves
+  #               out of pi-blender's and pi-unity-vrchat's and asserts the halves
   #               agree on the Blender-side contract; without the extensions
   #               installed it reports 11 passed and 4 FAILED (both side
   #               bodies missing, plus a load-failure notice the run is not
@@ -140,7 +140,7 @@ jobs:
           # should read is the paragraph below, not "unbound variable".
           if [ -z "${CONSUMER_TOKEN:-}" ]; then
             {
-              echo "CONSUMER_TOKEN is not set, so pi-blender and pi-unity"
+              echo "CONSUMER_TOKEN is not set, so pi-blender and pi-unity-vrchat"
               echo "cannot be checked out and the cross-repo check cannot"
               echo "run. test/manager-prompt.mjs asserts that this"
               echo "repository's manager prompt and pi-blender's agree on"
@@ -197,14 +197,14 @@ jobs:
           path: projects/pi-blender
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      # pi-unity's manager prompt is half of what this repository's is composed
+      # pi-unity-vrchat's manager prompt is half of what this repository's is composed
       # from, so a runner has to have it or the check below has nothing to
       # compare against.
       - uses: actions/checkout@v5
         with:
-          repository: luxuride-pi-extensions/pi-unity
+          repository: luxuride-pi-extensions/pi-unity-vrchat
           ref: master
-          path: projects/pi-unity
+          path: projects/pi-unity-vrchat
           token: ${{ secrets.CONSUMER_TOKEN }}
 
       - uses: actions/setup-node@v5
@@ -233,7 +233,7 @@ jobs:
           # was the workspace root, and the runner reported
           # `cd: projects/pi-unity-blender: No such file or directory` -- the
           # path is relative, so it only resolves from the root.
-          for repo in pi-blender pi-unity; do
+          for repo in pi-blender pi-unity-vrchat; do
             (cd "projects/$repo" && npm ci --legacy-peer-deps)
           done
           # This repository IS projects/pi-unity-blender, so it needs the same
@@ -262,7 +262,7 @@ jobs:
           agent="$RUNNER_TEMP/agent-dir/extensions"
           mkdir -p "$agent"
           w="$GITHUB_WORKSPACE/projects"
-          ln -s "$w/pi-unity"         "$agent/pi-unity"
+          ln -s "$w/pi-unity-vrchat"         "$agent/pi-unity-vrchat"
           ln -s "$w/pi-blender"       "$agent/pi-blender"
           ln -s "$w/pi-manager-core"  "$agent/manager-core"
           ln -s "$w/pi-unity-blender" "$agent/unity-blender"
