@@ -3,6 +3,11 @@
   "version": "0.1.1",
   "description": "pi extension: /unity-blender binder that moves meshes and materials between a live Blender session and a live Unity project",
   "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "license": "MIT",
   "files": [
     "index.ts",
