@@ -138,6 +138,9 @@ const managerMode = core.createManagerMode({
 		// blocks on this session's own async runs, subagent_supervisor answers
 		// a child that needs a decision. Both belong to pi-subagents.
 		"subagent",
+		// The loader stays listed even when `subagent` is already active: on
+		// models that add tools mid-conversation it is the only way in, and a
+		// gate that does not name a tool refuses the call.
 		"subagents_enable",
 		"bg_wait",
 		"subagent_supervisor",

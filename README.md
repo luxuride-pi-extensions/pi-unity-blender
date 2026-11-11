@@ -49,6 +49,16 @@ node scripts/install-agents.mjs            # dry run: print resolved paths
 node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
 ```
 
+### Subagent activation
+
+Manager sessions delegate through pi's `subagent` tool. A session on a model that
+can add tools mid-conversation starts with only `subagents_enable` active, and
+the manager calls it once before the first spawn; every other session has
+`subagent` from the start and never touches the loader. To keep `subagent`
+always active, set `"toolActivation": "eager"` in
+`~/.pi/agent/extensions/subagent/config.json`, or start pi with
+`--exclude-tools subagents_enable`.
+
 Transfer mechanics, staging, editor detection and per-tool behaviour:
 [docs/DESIGN.md](docs/DESIGN.md).
 
