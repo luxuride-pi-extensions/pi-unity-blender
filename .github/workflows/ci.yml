@@ -277,7 +277,10 @@ jobs:
       # file" instead of looking like a resolver bug in bridge-scripts.ts.
       - name: fetch the blender-bridge package
         run: |
-          curl -fsSL -o /tmp/bridge.tgz \
+          # --retry*: a freshly published release asset answers 404 for about a
+          # minute while GitHub's CDN catches up, which is exactly the window this
+          # step runs in when a PR pins a new tag.
+          curl -fsSL --retry 10 --retry-delay 6 --retry-all-errors -o /tmp/bridge.tgz \
             https://github.com/luxuride-pi-extensions/pi-blender-bridge/releases/download/v0.2.0/luxuride-pi-blender-bridge-0.2.0.tgz
           mkdir -p "$RUNNER_TEMP/blender-bridge"
           tar xzf /tmp/bridge.tgz -C "$RUNNER_TEMP/blender-bridge" --strip-components=1
