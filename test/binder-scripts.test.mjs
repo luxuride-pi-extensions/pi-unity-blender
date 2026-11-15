@@ -42,7 +42,22 @@ import test, { after, before, describe } from "node:test";
 import { loadTs } from "./paths.mjs";
 
 const PLACEHOLDER = "__PI_BINDER_CONFIG__";
-const SCRIPT_DIR = join(import.meta.dirname, "..", "binder", "scripts");
+
+// The templates are GPL-3.0-or-later and live in @luxuride-pi/blender-bridge, so
+// this reads them through the same resolver the renderer uses rather than
+// reaching into a directory of this package that no longer has any Python.
+// Resolution is attempted here, at module scope, but failure is RECORDED and
+// not thrown: the suites that need Blender skip on a machine without it, and a
+// missing bridge has to be reported by a real failing test rather than by a
+// module-load error that reads like a broken test file.
+const { binderScriptsDir } = await loadTs("binder/bridge-scripts.ts");
+let SCRIPT_DIR = null;
+let BRIDGE_ERROR = null;
+try {
+	SCRIPT_DIR = binderScriptsDir();
+} catch (error) {
+	BRIDGE_ERROR = error instanceof Error ? error.message : String(error);
+}
 
 /**
  * The interpreter used for the syntax checks, resolved through PATH rather than
@@ -74,7 +89,7 @@ const work = mkdtempSync(join(homedir(), ".cache", "pi-binder-tests-"));
 let blenderCommand = [];
 
 /**
- * Every script in binder/scripts, GLOBBED -- so a NEW script cannot be added
+ * Every template in the bridge's blender/binder, GLOBBED -- so a NEW one cannot be added
  * without a test.
  *
  * The list was hardcoded, which is precisely the failure its own comment warns
@@ -86,13 +101,45 @@ let blenderCommand = [];
  * read once from disk, and asserted EQUAL in both directions below: an extra
  * file must fail, and so must a name listed here that is gone.
  */
-const SCRIPTS = readdirSync(SCRIPT_DIR)
-	.filter((name) => name.endsWith(".py"))
-	.map((name) => name.replace(/\.py$/, ""))
-	.sort();
+const SCRIPTS = SCRIPT_DIR
+	? readdirSync(SCRIPT_DIR)
+			.filter((name) => name.endsWith(".py"))
+			.map((name) => name.replace(/\.py$/, ""))
+			.sort()
+	: [];
 
 // Detection runs HERE, at module scope, and not in a `before` hook -- see the
 // comment on BLENDER for why that is the whole fix.
+// Not behind NEEDS_BLENDER: this is the one claim that must hold on a machine
+// with no Blender at all, because it is what keeps "MIT" true for this package.
+test("the transfer templates come from the GPL bridge package", () => {
+	assert.ok(SCRIPT_DIR, BRIDGE_ERROR ?? "the bridge package did not resolve");
+	assert.ok(
+		SCRIPTS.length > 0,
+		`no .py templates found in ${SCRIPT_DIR}: the bridge package is present but empty`,
+	);
+	assert.deepEqual(
+		SCRIPTS,
+		["export_fbx", "import_fbx", "import_obj"],
+		"the bridge's blender/binder/ must hold exactly the three transfer templates",
+	);
+	assert.ok(
+		!existsSync(join(import.meta.dirname, "..", "binder", "scripts")),
+		"a binder/scripts directory must not come back: Blender Python here makes the MIT claim false",
+	);
+});
+
+// Same reason: `files` is what npm actually publishes, and an entry covering a
+// .py file would put GPL code in an MIT tarball even if the file were elsewhere
+// in the tree.
+test("the published package carries no Blender Python", () => {
+	const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"));
+	for (const entry of pkg.files ?? []) {
+		assert.ok(!entry.endsWith(".py"), `package.json files ships Python: ${entry}`);
+	}
+	assert.equal(pkg.license, "MIT", "the packaged license must match what ships");
+});
+
 const { detectBlender } = await loadTs("binder/editors.ts");
 const { renderBinderScript } = await loadTs("binder/script-template.ts");
 const detected = await detectBlender();
@@ -288,9 +335,9 @@ const CLEAR = "import bpy\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.o
 
 describe("binder scripts", NEEDS_BLENDER, () => {
 	describe("the render step", () => {
-		test("every script in binder/scripts is covered by this file", () => {
+		test("every template in the bridge is covered by this file", () => {
 			// SCRIPTS is globbed from disk, so this asserts the two sets are the
-			// same. It also fails if binder/scripts has no .py at all, which a
+			// same. It also fails if the bridge has no templates at all, which a
 			// hardcoded list would have reported as a pass.
 			assert.ok(SCRIPTS.length > 0, `no .py scripts found in ${SCRIPT_DIR}`);
 
@@ -306,7 +353,7 @@ describe("binder scripts", NEEDS_BLENDER, () => {
 			assert.deepEqual(
 				SCRIPTS,
 				[...rendered].sort(),
-				`binder/scripts holds [${SCRIPTS.join(", ")}] but this file renders [${[...rendered].sort().join(", ")}]`,
+				`the bridge holds [${SCRIPTS.join(", ")}] but this file renders [${[...rendered].sort().join(", ")}]`,
 			);
 		});
 

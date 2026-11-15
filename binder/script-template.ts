@@ -9,13 +9,15 @@
  *
  * Using a placeholder (rather than string replacement of Python syntax) keeps
  * the staged script a real .py file with a valid, lintable structure.
+ *
+ * The templates themselves are GPL-3.0-or-later and live in the
+ * `@luxuride-pi/blender-bridge` package, not here: they import `bpy`, so they
+ * cannot travel in an MIT package. `bridge-scripts.ts` resolves them.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const BINDER_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
+import { binderScriptPath } from "./bridge-scripts.js";
 
 const PLACEHOLDER = "__PI_BINDER_CONFIG__";
 
@@ -25,7 +27,7 @@ export function renderBinderScript(
 	config: Record<string, unknown>,
 	destination: string,
 ): string {
-	const templatePath = join(BINDER_DIR, "scripts", `${scriptName}.py`);
+	const templatePath = binderScriptPath(scriptName);
 	const template = readFileSync(templatePath, "utf8");
 	if (!template.includes(PLACEHOLDER)) {
 		throw new Error(
