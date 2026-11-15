@@ -105,8 +105,10 @@ fresh each run. JSON is valid Python for every value passed here, and it escapes
 names correctly — which matters, because object and texture names come from the
 user's scene.
 
-`binder/scripts/export_fbx.py` and `binder/scripts/import_obj.py` are therefore
-real, lintable `.py` files rather than template strings.
+`export_fbx.py`, `import_obj.py` and `import_fbx.py` are therefore real, lintable
+`.py` files rather than template strings. They are GPL-3.0-or-later — they import
+`bpy` — so they live in `@luxuride-pi/blender-bridge` under `blender/binder/`, and
+`binder/bridge-scripts.ts` resolves them from there.
 
 ## Editor detection
 
@@ -172,7 +174,8 @@ npm run test:unit     # the fast suites only: no Blender process is launched
 npm run test:scripts  # just the three Python scripts
 ```
 
-`test/binder-scripts.test.mjs` runs the real `binder/scripts/*.py` in a headless
+`test/binder-scripts.test.mjs` runs the real templates from the bridge's
+`blender/binder/*.py` in a headless
 Blender, because every claim those scripts make is about how a Blender operator
 reacts to a keyword set on a given build — a mock would encode the answer and
 pass whatever the script did. It skips with the paths it searched when no

@@ -38,6 +38,19 @@ directory is invisible to pi: the skill would exist on disk and never load.
 pi install npm:@luxuride-pi/unity-blender
 ```
 
+It also needs the GPL bridge package, which carries the Blender-side Python for
+both this extension and `@luxuride-pi/blender` (see [License](#license)):
+
+```bash
+git clone --depth 1 https://github.com/luxuride-pi-extensions/pi-blender-bridge \
+  ~/.pi/agent/extensions/pi-blender-bridge
+```
+
+Neither extension can find it from npm — npm 12 disables git and remote specs by
+default — so it is a clone (or `PI_BLENDER_BRIDGE_ASSETS_DIR` pointing at one),
+and the tools fail with the clone command in the message rather than a stack
+trace.
+
 The `unity-blender-manager` agent must also exist in `$PI_AGENT_DIR/agents`,
 and it needs both side extensions installed for its `extensions:` line. The
 binder ships its agent templates, so install them once from the installed
@@ -97,4 +110,15 @@ Bump the version *before* tagging; the tag is not the place to bump.
 
 ## License
 
-MIT
+MIT — this package: the tool surface, the binder logic, the skills and the agent
+prompts.
+
+The three transfer templates do **not** ship here. `export_fbx.py`,
+`import_obj.py` and `import_fbx.py` import `bpy`, which makes them
+GPL-3.0-or-later, so they live in
+[@luxuride-pi/blender-bridge](https://github.com/luxuride-pi-extensions/pi-blender-bridge)
+under `blender/binder/` and this package stages copies of them at transfer time.
+That is why the tarball contains no Python at all: a package cannot be MIT and
+carry GPL code at the same time. Resolution order and the
+`PI_BLENDER_BRIDGE_ASSETS_DIR` override are identical to `@luxuride-pi/blender`'s,
+so one bridge installation serves both extensions.
