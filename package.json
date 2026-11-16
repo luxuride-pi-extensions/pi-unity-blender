@@ -1,6 +1,6 @@
 {
   "name": "@luxuride-pi/unity-blender",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "pi extension: /unity-blender binder that moves meshes and materials between a live Blender session and a live Unity project",
   "type": "module",
   "pi": {
